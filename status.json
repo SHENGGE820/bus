@@ -1,0 +1,18 @@
+{
+  "updated_at": "",
+  "date": "",
+  "sessions": {
+    "早上": {
+      "board_stop": "看守所",
+      "exit_stop": "中原中平路口",
+      "active": [],
+      "completed": []
+    },
+    "晚上": {
+      "board_stop": "中原路",
+      "exit_stop": "看守所",
+      "active": [],
+      "completed": []
+    }
+  }
+}

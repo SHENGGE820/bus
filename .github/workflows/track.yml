@@ -9,7 +9,11 @@ on:
 jobs:
   track:
     runs-on: ubuntu-latest
-    timeout-minutes: 90    # 最多跑 90 分鐘
+    timeout-minutes: 200   # 早上 07:00 到 10:00，預留啟動與收尾時間
+
+    concurrency:
+      group: bus-813-tracker
+      cancel-in-progress: false
 
     permissions:
       contents: write      # 允許把 CSV 結果 commit 回 repo
@@ -37,7 +41,8 @@ jobs:
           # 每 5 分鐘把 status.json 推上去（讓網頁能看到即時狀態）
           (while true; do
             sleep 300
-            git add status.json travel_log.csv 2>/dev/null
+            [ -f status.json ] && git add status.json
+            [ -f travel_log.csv ] && git add travel_log.csv
             git diff --staged --quiet || (git commit -m "live: $(date +'%H:%M')" && git push)
           done) &
           LOOP=$!
@@ -45,8 +50,10 @@ jobs:
           python tracker.py
 
           kill $LOOP 2>/dev/null || true
+          wait $LOOP 2>/dev/null || true
 
           # 最終結果 commit
-          git add status.json travel_log.csv
+          [ -f status.json ] && git add status.json
+          [ -f travel_log.csv ] && git add travel_log.csv
           git diff --staged --quiet || git commit -m "done: $(date +'%Y-%m-%d %H:%M')"
           git push

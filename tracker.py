@@ -13,6 +13,7 @@ import csv
 import os
 import sys
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
@@ -20,6 +21,7 @@ LOG_FILE    = os.path.join(SCRIPT_DIR, "travel_log.csv")
 STATUS_FILE = os.path.join(SCRIPT_DIR, "status.json")
 
 IS_CLOUD = os.environ.get("GITHUB_ACTIONS") == "true"
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 TDX_TOKEN_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 TDX_BASE      = "https://tdx.transportdata.tw/api/basic/v2/Bus"
@@ -38,6 +40,12 @@ def load_config():
         cfg["client_id"] = os.environ["TDX_CLIENT_ID"]
     if os.environ.get("TDX_CLIENT_SECRET"):
         cfg["client_secret"] = os.environ["TDX_CLIENT_SECRET"]
+    required = ("client_id", "client_secret", "city", "route", "poll_interval", "sessions")
+    missing = [key for key in required if not cfg.get(key)]
+    if missing:
+        raise ValueError(f"設定缺少必要欄位：{', '.join(missing)}")
+    if cfg["poll_interval"] < 15:
+        raise ValueError("poll_interval 不可小於 15 秒，以免超過 TDX 流量限制")
     return cfg
 
 
@@ -80,17 +88,15 @@ def get_realtime_near_stop(cfg, direction):
 
 
 def get_next_bus_eta(cfg, direction, stop_name):
-    try:
-        data = tdx_get(
-            f"EstimatedTimeOfArrival/City/{cfg['city']}/{cfg['route']}",
-            cfg,
-            {"$filter":  f"StopName/Zh_tw eq '{stop_name}' and Direction eq {direction}",
-             "$orderby": "EstimateTime asc"}
-        )
-        if data:
-            return data[0].get("EstimateTime"), data[0].get("PlateNumb", "?")
-    except Exception:
-        pass
+    data = tdx_get(
+        f"EstimatedTimeOfArrival/City/{cfg['city']}/{cfg['route']}",
+        cfg,
+        {"$filter": f"StopName/Zh_tw eq '{stop_name}' and Direction eq {direction}"}
+    )
+    estimates = [item for item in data if isinstance(item.get("EstimateTime"), int)]
+    if estimates:
+        next_bus = min(estimates, key=lambda item: item["EstimateTime"])
+        return next_bus["EstimateTime"], next_bus.get("PlateNumb") or "未提供車牌"
     return None, None
 
 
@@ -112,9 +118,13 @@ def list_stops(cfg):
 
 
 def write_status(day_status):
-    day_status["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+    day_status["updated_at"] = datetime.datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    temp_file = STATUS_FILE + ".tmp"
+    with open(temp_file, "w", encoding="utf-8") as f:
         json.dump(day_status, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temp_file, STATUS_FILE)
 
 
 def save_log(date_str, session_name, plate, board_t, exit_t, minutes):
@@ -179,9 +189,8 @@ def run_session(cfg, sess, today, day_status):
     print(f"   每 {cfg['poll_interval']} 秒刷新，Ctrl+C 中止\n")
 
     while True:
-        now_taiwan = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        now_local  = datetime.datetime.now()
-        ts         = now_local.strftime("%H:%M:%S")
+        now_taiwan = datetime.datetime.now(TAIPEI_TZ)
+        ts         = now_taiwan.strftime("%H:%M:%S")
 
         if now_taiwan.hour >= sess["end_hour"]:
             print(f"\n  {sess['end_hour']}:00 時段結束。")
@@ -200,8 +209,8 @@ def run_session(cfg, sess, today, day_status):
                     and b.get("A2EventType") == 0]:
             plate = bus.get("PlateNumb", "unknown")
             if plate not in active:
-                active[plate] = now_local
-                board_times.append(now_local)
+                active[plate] = now_taiwan
+                board_times.append(now_taiwan)
                 gap_str = ""
                 if len(board_times) >= 2:
                     gap = (board_times[-1] - board_times[-2]).total_seconds() / 60
@@ -215,16 +224,16 @@ def run_session(cfg, sess, today, day_status):
                     and b.get("PlateNumb", "") in active]:
             plate    = bus.get("PlateNumb", "")
             board_dt = active.pop(plate)
-            duration = (now_local - board_dt).total_seconds() / 60
+            duration = (now_taiwan - board_dt).total_seconds() / 60
             print(f"[{ts}] {plate} 抵達 {exit_stop}，共 {duration:.1f} 分鐘")
             save_log(today, name, plate,
                      board_dt.strftime("%H:%M:%S"),
-                     now_local.strftime("%H:%M:%S"),
+                     now_taiwan.strftime("%H:%M:%S"),
                      duration)
             sess_status["completed"].append({
                 "plate":       plate,
                 "board_time":  board_dt.strftime("%H:%M:%S"),
-                "exit_time":   now_local.strftime("%H:%M:%S"),
+                "exit_time":   now_taiwan.strftime("%H:%M:%S"),
                 "duration_min": round(duration, 1)
             })
             current_stop.pop(plate, None)
@@ -243,22 +252,27 @@ def run_session(cfg, sess, today, day_status):
             {"plate":        p,
              "board_time":   active[p].strftime("%H:%M:%S"),
              "current_stop": current_stop.get(p, {}).get("stop", ""),
-             "elapsed_sec":  int((now_local - active[p]).total_seconds())}
+             "elapsed_sec":  int((now_taiwan - active[p]).total_seconds())}
             for p in active
         ]
         write_status(day_status)
 
         # 狀態列
         if active:
-            status = ", ".join(f"{p}({(now_local-t).seconds//60}分)" for p,t in active.items())
+            status = ", ".join(f"{p}({int((now_taiwan-t).total_seconds())//60}分)" for p,t in active.items())
             print(f"[{ts}] 追蹤中：{status}", end="\r")
         else:
-            est, next_plate = get_next_bus_eta(cfg, direction, board_stop)
+            try:
+                est, next_plate = get_next_bus_eta(cfg, direction, board_stop)
+            except Exception as e:
+                print(f"[{ts}] ETA API 錯誤：{e}", end="\r")
+                time.sleep(cfg["poll_interval"])
+                continue
             if est is not None and est >= 0:
-                arrive_at = now_local + datetime.timedelta(seconds=est)
+                arrive_at = now_taiwan + datetime.timedelta(seconds=est)
                 extra = ""
                 if "walk_minutes" in sess:
-                    dep = now_local + datetime.timedelta(seconds=est - sess["walk_minutes"]*60)
+                    dep = now_taiwan + datetime.timedelta(seconds=est - sess["walk_minutes"]*60)
                     extra = f"  -> 建議 {dep.strftime('%H:%M')} 出門"
                 print(f"[{ts}] 下一班 {next_plate}：{est//60} 分後到站({arrive_at.strftime('%H:%M')}){extra}", end="\r")
                 if est > 300:
@@ -292,7 +306,7 @@ def main():
         sys.exit(1)
 
     show_stats(cfg)
-    today = datetime.date.today().strftime("%Y-%m-%d")
+    today = datetime.datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d")
 
     day_status = {
         "updated_at": "",
@@ -309,7 +323,7 @@ def main():
     }
     write_status(day_status)
 
-    now_taiwan = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+    now_taiwan = datetime.datetime.now(TAIPEI_TZ)
     current_h  = now_taiwan.hour
 
     if IS_CLOUD:
@@ -326,11 +340,11 @@ def main():
     try:
         for sess in sessions_to_run:
             if not IS_CLOUD:
-                if datetime.datetime.now().hour >= sess["end_hour"]:
+                if datetime.datetime.now(TAIPEI_TZ).hour >= sess["end_hour"]:
                     print(f"  [{sess['name']}] 已過時段，略過。")
                     continue
-                while datetime.datetime.now().hour < sess["start_hour"]:
-                    now = datetime.datetime.now()
+                while datetime.datetime.now(TAIPEI_TZ).hour < sess["start_hour"]:
+                    now = datetime.datetime.now(TAIPEI_TZ)
                     remain = (sess["start_hour"] - now.hour) * 60 - now.minute
                     print(f"  距 [{sess['name']}] 開始還有 {remain} 分鐘…", end="\r")
                     time.sleep(30)

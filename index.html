@@ -82,20 +82,22 @@
 
     .empty { color: #ccc; font-size: 13px; padding: 8px 0; text-align: center; }
     .footer { text-align: center; font-size: 11px; color: #ccc; margin-top: 4px; }
+    .stale { color:#d97706; font-weight:600; }
   </style>
 </head>
 <body>
   <h1>🚌 813路 公車動態</h1>
   <p class="subtitle" id="updated">載入中…</p>
   <div id="content"></div>
-  <p class="footer">每 60 秒自動刷新</p>
+  <p class="footer">頁面每 60 秒檢查，追蹤資料約每 5 分鐘更新</p>
 
   <script>
     const RAW = "https://raw.githubusercontent.com/SHENGGE820/bus/main/status.json";
     let data = null;
+    let dataIsStale = false;
 
     function toMs(timeStr, dateStr) {
-      return new Date(dateStr + "T" + timeStr).getTime();
+      return new Date(dateStr + "T" + timeStr + "+08:00").getTime();
     }
 
     function fmtElapsed(ms) {
@@ -108,6 +110,7 @@
     async function fetchData() {
       try {
         const r = await fetch(RAW + "?_=" + Date.now());
+        if (!r.ok) throw new Error("HTTP " + r.status);
         data = await r.json();
         render();
       } catch (e) {
@@ -117,12 +120,22 @@
 
     function render() {
       if (!data) return;
-      document.getElementById("updated").textContent = "更新：" + data.updated_at;
+      const updatedEl = document.getElementById("updated");
+      if (!data.updated_at) {
+        dataIsStale = true;
+        updatedEl.className = "subtitle stale";
+        updatedEl.textContent = "尚未有追蹤資料，請等待排程啟動";
+      } else {
+        const updatedMs = new Date(data.updated_at.replace(" ", "T") + "+08:00").getTime();
+        dataIsStale = !Number.isFinite(updatedMs) || Date.now() - updatedMs > 10 * 60 * 1000;
+        updatedEl.className = dataIsStale ? "subtitle stale" : "subtitle";
+        updatedEl.textContent = "更新：" + data.updated_at + (dataIsStale ? "（資料已超過 10 分鐘）" : "");
+      }
 
       document.getElementById("content").innerHTML =
         Object.entries(data.sessions).map(([name, sess]) => {
 
-          const activeHtml = sess.active.length
+          const activeHtml = !dataIsStale && sess.active.length
             ? sess.active.map(b => `
                 <div class="bus-active">
                   <div class="dot"></div>
@@ -132,7 +145,7 @@
                   </div>
                   <div class="cur-stop">📍 ${b.current_stop || "追蹤中…"}</div>
                 </div>`).join("")
-            : `<div class="empty">目前無進行中班次</div>`;
+            : `<div class="empty">${dataIsStale && sess.active.length ? "資料已過期，暫停顯示進行中班次" : "目前無進行中班次"}</div>`;
 
           const doneHtml = sess.completed.length
             ? [...sess.completed].reverse().map(b => `
@@ -159,7 +172,7 @@
 
     // 每秒更新計時器
     setInterval(() => {
-      if (!data) return;
+      if (!data || dataIsStale) return;
       document.querySelectorAll("[data-board]").forEach(el => {
         el.textContent = fmtElapsed(Date.now() - toMs(el.dataset.board, el.dataset.date));
       });
