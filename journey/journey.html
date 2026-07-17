@@ -351,14 +351,14 @@ async function fetchMapData() {
   try {
     const r = await fetch("/map-data");
     mapData = await r.json();
-    if (!mapReady) {
-      initLeafMap();  // 不管有沒有 waypoints，直接初始化
-    }
     if (mapReady && mapData.waypoints && mapData.waypoints.length >= 2) {
       drawRoute();
     }
     if (mapReady) updateCharMarker();
-  } catch(e) {}
+  } catch(e) {
+    document.getElementById("map-hint").textContent = "⚠ 無法連線到伺服器（" + e.message + ")";
+    document.getElementById("map-hint").style.display = "";
+  }
 }
 
 function initLeafMap() {
@@ -513,6 +513,8 @@ function startGeoWatch() {
   );
 }
 
+// 頁面載入時直接初始化地圖（不等 fetch）
+initLeafMap();
 fetchMapData();
 setInterval(fetchMapData, 3000);  // 每 3 秒更新（bus GPS + 確認 waypoints）
 </script>
