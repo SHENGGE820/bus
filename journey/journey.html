@@ -351,8 +351,11 @@ async function fetchMapData() {
   try {
     const r = await fetch("/map-data");
     mapData = await r.json();
-    if (!mapReady && mapData.waypoints && mapData.waypoints.length >= 2) {
-      initLeafMap();
+    if (!mapReady) {
+      initLeafMap();  // 不管有沒有 waypoints，直接初始化
+    }
+    if (mapReady && mapData.waypoints && mapData.waypoints.length >= 2) {
+      drawRoute();
     }
     if (mapReady) updateCharMarker();
   } catch(e) {}
@@ -366,32 +369,42 @@ function initLeafMap() {
 
   leafMap = L.map("map", {zoomControl:false, attributionControl:false});
 
-  // CartoDB Dark Matter tiles (no API key)
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
               {maxZoom:19}).addTo(leafMap);
 
-  const pts = mapData.waypoints.map(w => [w.lat, w.lng]);
+  // 預設視角：新北市
+  leafMap.setView([25.03, 121.46], 12);
 
-  // Planned route — dashed blue
-  routeLine = L.polyline(pts, {color:"#1565c0", weight:3, opacity:.6, dashArray:"8,6"}).addTo(leafMap);
-
-  // Waypoint dots
-  mapData.waypoints.forEach((w, i) => {
-    const isEnd = i===0 || i===mapData.waypoints.length-1;
-    L.circleMarker([w.lat, w.lng], {
-      radius: isEnd?8:5, color:"#fff", weight:2,
-      fillColor: isEnd?"#FF9800":"#1565c0", fillOpacity:1
-    }).bindTooltip(w.name, {direction:"top", className:"map-tip"}).addTo(leafMap);
-  });
-
-  leafMap.fitBounds(routeLine.getBounds(), {padding:[24,24]});
-
-  // Touch: zoom by double-tap on map wrap
+  // Touch: zoom by double-tap
   document.getElementById("map-wrap").addEventListener("dblclick", () => {
     leafMap.zoomIn();
   });
 
   startGeoWatch();
+
+  // 如果已有 waypoints，馬上畫
+  if (mapData && mapData.waypoints && mapData.waypoints.length >= 2) {
+    drawRoute();
+  }
+}
+
+function drawRoute() {
+  if (!leafMap || !mapData || !mapData.waypoints || mapData.waypoints.length < 2) return;
+  const pts = mapData.waypoints.map(w => [w.lat, w.lng]);
+
+  if (routeLine) { routeLine.remove(); routeLine = null; }
+
+  routeLine = L.polyline(pts, {color:"#1565c0", weight:3, opacity:.6, dashArray:"8,6"}).addTo(leafMap);
+
+  mapData.waypoints.forEach((w, i) => {
+    const isEnd = i===0 || i===mapData.waypoints.length-1;
+    L.circleMarker([w.lat, w.lng], {
+      radius: isEnd?8:5, color:"#fff", weight:2,
+      fillColor: isEnd?"#FF9800":"#1565c0", fillOpacity:1
+    }).bindTooltip(w.name, {direction:"top"}).addTo(leafMap);
+  });
+
+  leafMap.fitBounds(routeLine.getBounds(), {padding:[24,24]});
 }
 
 function getCharIcon(type, status) {
@@ -494,7 +507,7 @@ function startGeoWatch() {
 }
 
 fetchMapData();
-setInterval(fetchMapData, 10000);  // re-fetch every 10s for bus GPS
+setInterval(fetchMapData, 3000);  // 每 3 秒更新（bus GPS + 確認 waypoints）
 </script>
 </body>
 </html>

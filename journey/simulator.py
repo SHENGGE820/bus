@@ -146,7 +146,7 @@ def get_bus_live_pos(city, route, direction, plate, cfg):
 def _fetch_waypoints_task():
     """背景任務：啟動時從 TDX 取得路線各站/站牌座標"""
     global _waypoints
-    time.sleep(4)   # 等 token 就緒
+    time.sleep(1)   # 等 token 就緒
     coords = {}
 
     try:  # 機場捷運站
