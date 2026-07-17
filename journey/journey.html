@@ -36,6 +36,8 @@
     .eta-sub { font-size:13px; color:#555; min-height:18px; transition:color .3s; }
     .eta-sub.active { color:#64b5f6; }
     .eta-sub.done { color:#66bb6a; }
+    .trip-timing { font-size:12px; color:#777; margin-top:7px; min-height:18px; }
+    .trip-timing.done { color:#81c784; font-weight:600; }
 
     .btn { display:block; width:100%; padding:18px; border:none; border-radius:16px; font-size:18px; font-weight:700; cursor:pointer; margin-bottom:10px; position:relative; overflow:hidden; transition:transform .15s; }
     .btn:active { transform:scale(.97); }
@@ -176,9 +178,10 @@
 <body>
 
 <div class="eta-bar">
-  <div class="eta-label">預計抵達</div>
+  <div class="eta-label" id="eta-label">預計抵達</div>
   <div class="eta-time" id="eta">--:--</div>
   <div class="eta-sub" id="eta-sub">按下出發開始模擬</div>
+  <div class="trip-timing" id="trip-timing"></div>
 </div>
 
 <div class="walking-setting">
@@ -187,12 +190,7 @@
     <input id="height-cm" type="number" min="120" max="220" step="1" value="170" inputmode="numeric">
     <span class="setting-unit">cm</span>
   </div>
-  <div class="walking-setting-row">
-    <label for="cadence-spm">步頻</label>
-    <input id="cadence-spm" type="number" min="60" max="160" step="1" value="110" inputmode="numeric">
-    <span class="setting-unit">步／分鐘</span>
-  </div>
-  <div class="walking-note" id="walking-note">依身高 × 0.414 與步頻動態調整</div>
+  <div class="walking-note" id="walking-note">採一般步頻 110 步／分鐘估算</div>
 </div>
 
 <button class="btn btn-depart" id="btn-depart" onclick="addRipple(event,this);depart()">🚀 出發！</button>
@@ -249,24 +247,18 @@ async function reset()  {
 
 async function saveWalkingProfile() {
   const heightInput = document.getElementById("height-cm");
-  const cadenceInput = document.getElementById("cadence-spm");
   const height = Number(heightInput.value);
-  const cadence = Number(cadenceInput.value);
   if (!Number.isFinite(height) || height < 120 || height > 220) {
     document.getElementById("walking-note").textContent = "身高請輸入 120–220 cm";
     return;
   }
-  if (!Number.isFinite(cadence) || cadence < 60 || cadence > 160) {
-    document.getElementById("walking-note").textContent = "步頻請輸入 60–160 步／分鐘";
-    return;
-  }
   localStorage.setItem("commuteHeightCm", String(height));
-  localStorage.setItem("commuteCadenceSpm", String(cadence));
+  localStorage.removeItem("commuteCadenceSpm");
   try {
     const r = await fetch("/settings", {
       method:"POST", cache:"no-store",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({height_cm:height, cadence_spm:cadence})
+      body:JSON.stringify({height_cm:height})
     });
     const result = await r.json();
     if (!r.ok || result.ok === false) throw new Error(result.msg || `HTTP ${r.status}`);
@@ -275,7 +267,7 @@ async function saveWalkingProfile() {
       ? "基準時間"
       : `時間約${difference < 0 ? "縮短" : "增加"} ${Math.abs(difference)}%`;
     document.getElementById("walking-note").textContent =
-      `步長 ${result.step_length_m} m・速度 ${result.speed_mpm} m/min・${adjustment}`;
+      `估計步長 ${result.step_length_m} m・一般步頻 110・${adjustment}`;
     await fetchStatus();
   } catch(e) {
     document.getElementById("walking-note").textContent = `設定失敗：${e.message}`;
@@ -351,13 +343,22 @@ function render() {
   if (document.activeElement !== heightInput && data.height_cm) {
     heightInput.value = Math.round(data.height_cm);
   }
-  const cadenceInput = document.getElementById("cadence-spm");
-  if (document.activeElement !== cadenceInput && data.cadence_spm) {
-    cadenceInput.value = Math.round(data.cadence_spm);
-  }
-
+  const completed = !running && data.completed_at && data.elapsed_text;
+  document.getElementById("eta-label").textContent = completed ? "實際抵達" : "預計抵達";
   document.getElementById("eta").textContent = data.eta_str || "--:--";
   document.getElementById("eta").classList.toggle("running", running);
+
+  const timing = document.getElementById("trip-timing");
+  if (completed) {
+    timing.className = "trip-timing done";
+    timing.textContent = `出發 ${data.started_at} → 抵達 ${data.completed_at}・總耗時 ${data.elapsed_text}`;
+  } else if (data.started_at) {
+    timing.className = "trip-timing";
+    timing.textContent = `實際出發時間 ${data.started_at}`;
+  } else {
+    timing.className = "trip-timing";
+    timing.textContent = "";
+  }
 
   const etaSub = document.getElementById("eta-sub");
   if (!running && cur===-1 && data.legs.every(l=>l.status==="pending")) {
@@ -666,21 +667,15 @@ function startGeoWatch() {
 
 // 頁面載入時直接初始化地圖（不等 fetch）
 const savedHeight = Number(localStorage.getItem("commuteHeightCm"));
-const savedCadence = Number(localStorage.getItem("commuteCadenceSpm"));
 if (savedHeight >= 120 && savedHeight <= 220) {
   document.getElementById("height-cm").value = savedHeight;
 }
-if (savedCadence >= 60 && savedCadence <= 160) {
-  document.getElementById("cadence-spm").value = savedCadence;
-}
-if ((savedHeight >= 120 && savedHeight <= 220) || (savedCadence >= 60 && savedCadence <= 160)) {
+if (savedHeight >= 120 && savedHeight <= 220) {
   saveWalkingProfile();
 }
-["height-cm", "cadence-spm"].forEach(id => {
-  document.getElementById(id).addEventListener("input", () => {
-    clearTimeout(walkingProfileSaveTimer);
-    walkingProfileSaveTimer = setTimeout(saveWalkingProfile, 500);
-  });
+document.getElementById("height-cm").addEventListener("input", () => {
+  clearTimeout(walkingProfileSaveTimer);
+  walkingProfileSaveTimer = setTimeout(saveWalkingProfile, 500);
 });
 initLeafMap();
 fetchMapData();

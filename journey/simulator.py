@@ -217,6 +217,11 @@ STATUS    = {
     "height_cm": 170.0,
     "cadence_spm": 110.0,
     "started_at": None,
+    "started_at_iso": None,
+    "completed_at": None,
+    "completed_at_iso": None,
+    "elapsed_seconds": None,
+    "elapsed_text": "",
     "eta_str": "--:--",
     "updated_at": "",
     "error": ""
@@ -235,6 +240,17 @@ def ts():
 def eta_from_now(remaining_min):
     t = datetime.datetime.now() + datetime.timedelta(minutes=remaining_min)
     return t.strftime("%H:%M")
+
+
+def format_elapsed(seconds):
+    total = max(0, int(round(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} 小時 {minutes} 分 {secs} 秒"
+    if minutes:
+        return f"{minutes} 分 {secs} 秒"
+    return f"{secs} 秒"
 
 
 def apply_walking_profile(height_cm, cadence_spm):
@@ -283,8 +299,17 @@ def advance_to_next_leg():
             STATUS["legs"][cur]["ended_at"] = now_str()
         nxt = cur + 1
         if nxt >= len(STATUS["legs"]):
+            completed = ts()
             STATUS["running"] = False
             STATUS["current_leg"] = -1
+            STATUS["completed_at"] = completed.strftime("%H:%M:%S")
+            STATUS["completed_at_iso"] = completed.isoformat()
+            started_iso = STATUS.get("started_at_iso")
+            elapsed = (completed - datetime.datetime.fromisoformat(started_iso)).total_seconds()
+            STATUS["elapsed_seconds"] = max(0, round(elapsed))
+            STATUS["elapsed_text"] = format_elapsed(elapsed)
+            STATUS["eta_str"] = completed.strftime("%H:%M")
+            STATUS["updated_at"] = now_str()
             return
         STATUS["current_leg"] = nxt
         leg = STATUS["legs"][nxt]
@@ -547,7 +572,13 @@ def depart():
             return jsonify({"ok": False, "msg": "已在進行中"})
         STATUS["running"]     = True
         STATUS["current_leg"] = -1
-        STATUS["started_at"]  = now_str()
+        started = ts()
+        STATUS["started_at"]  = started.strftime("%H:%M:%S")
+        STATUS["started_at_iso"] = started.isoformat()
+        STATUS["completed_at"] = None
+        STATUS["completed_at_iso"] = None
+        STATUS["elapsed_seconds"] = None
+        STATUS["elapsed_text"] = ""
         STATUS["error"]       = ""
         for leg in STATUS["legs"]:
             leg["status"]       = "pending"
@@ -575,13 +606,11 @@ def settings():
     payload = request.get_json(silent=True) or {}
     try:
         height_cm = float(payload.get("height_cm"))
-        cadence_spm = float(payload.get("cadence_spm", STATUS["cadence_spm"]))
     except (TypeError, ValueError):
-        return jsonify({"ok": False, "msg": "身高與步頻必須是數字"}), 400
+        return jsonify({"ok": False, "msg": "身高必須是數字"}), 400
     if not 120 <= height_cm <= 220:
         return jsonify({"ok": False, "msg": "身高請輸入 120–220 公分"}), 400
-    if not 60 <= cadence_spm <= 160:
-        return jsonify({"ok": False, "msg": "步頻請輸入 60–160 步／分鐘"}), 400
+    cadence_spm = 110.0
     apply_walking_profile(height_cm, cadence_spm)
     with _lock:
         running = STATUS["running"]
@@ -615,6 +644,11 @@ def reset():
         STATUS["current_leg"] = -1
         STATUS["eta_str"]     = "--:--"
         STATUS["started_at"]  = None
+        STATUS["started_at_iso"] = None
+        STATUS["completed_at"] = None
+        STATUS["completed_at_iso"] = None
+        STATUS["elapsed_seconds"] = None
+        STATUS["elapsed_text"] = ""
         STATUS["updated_at"]  = now_str()
         STATUS["error"]       = ""
         for leg in STATUS["legs"]:
