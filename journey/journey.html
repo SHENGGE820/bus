@@ -341,9 +341,9 @@ function _buildTimeline(firstBuild) {
     const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
     const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
     const nameClass=s==="completed"?"completed":s==="on_board"?"on_board":s==="waiting"?"waiting":s==="walking"?"walking":"";
-    const animStyle = firstBuild ? `animation-delay:${i*.04}s` : ``;
+    const animStyle = firstBuild ? `style="animation-delay:${i*.04}s"` : ``;
 
-    return `<div class="leg"${animStyle ? ` style="${animStyle}"` : ``}>
+    return `<div class="leg" ${animStyle}>`;
       <div class="leg-dot-col">
         <div class="${dotCls}"></div>
         ${isLast?"":` <div class="${lineCls}"></div>`}
