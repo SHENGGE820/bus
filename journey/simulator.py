@@ -294,6 +294,21 @@ def user_board():
     return False
 
 
+def auto_board_leg(leg, vehicle_id=""):
+    """TDX 偵測車輛進站後，自動把目前行程切換為已上車。"""
+    with _lock:
+        cur = STATUS["current_leg"]
+        if cur < 0 or STATUS["legs"][cur] is not leg or leg["status"] != "waiting":
+            return False
+        leg["status"] = "on_board"
+        leg["boarded_at"] = now_str()
+        leg["started_at"] = ts().isoformat()
+        if vehicle_id:
+            leg["vehicle_id"] = vehicle_id
+        leg["info"] = "已偵測進站，自動上車"
+        return True
+
+
 # ── 步行腿更新 ───────────────────────────────────────────────
 
 def update_walk_leg(leg):
@@ -318,7 +333,7 @@ def update_metro_waiting(leg):
         if est is None:
             leg["info"] = "查詢中…"
         elif est == 0:
-            leg["info"] = f"🚉 往{headsign}的車即將到站！"
+            auto_board_leg(leg)
         else:
             leg["info"] = f"下一班（往{headsign}）：{est} 分後到站"
     except Exception as e:
@@ -366,7 +381,28 @@ def update_bus_waiting(leg):
         else:
             leg["info"] = "查詢中…"
     except Exception as e:
-        leg["info"] = f"⚠ {e}"
+        leg["info"] = f"ETA 查詢中（{e}）"
+
+    # ETA 只代表預估；以 RealTimeNearStop 的進站事件作為自動上車依據。
+    try:
+        near = get_bus_near_stop(
+            leg["city"], leg["route"], leg["direction"], CFG)
+        arrivals = [
+            bus for bus in near
+            if bus.get("StopName", {}).get("Zh_tw", "") == leg["from_stop"]
+            and bus.get("A2EventType") == 0
+            and bus.get("PlateNumb", "")
+        ]
+        if arrivals:
+            expected_plate = leg.get("vehicle_id", "")
+            arriving = next(
+                (bus for bus in arrivals if bus.get("PlateNumb") == expected_plate),
+                arrivals[0]
+            )
+            auto_board_leg(leg, arriving.get("PlateNumb", ""))
+    except Exception as e:
+        if not leg.get("info"):
+            leg["info"] = f"進站偵測中（{e}）"
 
 
 def update_bus_on_board(leg):
@@ -420,6 +456,7 @@ def update_bus_on_board(leg):
 
 def poll_loop():
     while True:
+        sleep_seconds = 30
         try:
             with _lock:
                 running = STATUS["running"]
@@ -429,6 +466,8 @@ def poll_loop():
                     leg = STATUS["legs"][cur_idx]
                     ltype  = leg["type"]
                     lstatus = leg["status"]
+                if lstatus == "waiting":
+                    sleep_seconds = 15
 
                 if ltype == "walk" and lstatus == "walking":
                     update_walk_leg(leg)
@@ -446,7 +485,7 @@ def poll_loop():
         except Exception as e:
             with _lock:
                 STATUS["error"] = str(e)
-        time.sleep(30)
+        time.sleep(sleep_seconds)
 
 
 # ── Flask ────────────────────────────────────────────────────

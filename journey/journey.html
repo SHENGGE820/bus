@@ -166,7 +166,6 @@
 </div>
 
 <button class="btn btn-depart" id="btn-depart" onclick="addRipple(event,this);depart()">🚀 出發！</button>
-<button class="btn btn-board btn-hidden" id="btn-board" onclick="addRipple(event,this);board()">✅ 我上車了！</button>
 <button class="btn btn-reset" id="btn-reset" onclick="reset()">↺ 重設行程</button>
 
 <!-- Map -->
@@ -211,9 +210,6 @@ async function fetchStatus() {
 
 async function depart() {
   await postAction("/depart", "出發失敗");
-}
-async function board()  {
-  await postAction("/board", "上車失敗");
 }
 async function reset()  {
   arrivedOnce = false;
@@ -303,12 +299,6 @@ function render() {
   }
 
   document.getElementById("btn-depart").classList.toggle("btn-hidden", running);
-  const btnBoard=document.getElementById("btn-board");
-  btnBoard.classList.add("btn-hidden");
-  if (running && cur>=0 && data.legs[cur].status==="waiting") {
-    btnBoard.classList.remove("btn-hidden");
-    btnBoard.textContent = "✅ 我上" + (data.legs[cur].type==="bus"?"公車":"捷運") + "了！";
-  }
 
   // 狀態有變才重建 DOM，否則只更新文字，避免動畫重播
   const timeline = document.getElementById("timeline");
