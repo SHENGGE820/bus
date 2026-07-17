@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
@@ -8,88 +8,112 @@
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0f1117;
-      color: #e0e0e0;
-      min-height: 100vh;
-      padding: 16px 12px 32px;
+      background: #0b0d13; color: #e0e0e0;
+      min-height: 100vh; padding: 16px 12px 40px; overflow-x: hidden;
     }
+    @keyframes walk-bounce { 0%,100%{transform:translateY(0) rotate(-8deg)} 50%{transform:translateY(-5px) rotate(8deg)} }
+    @keyframes footstep { 0%,100%{opacity:0;transform:scale(.5) translateY(0)} 30%{opacity:1;transform:scale(1) translateY(-3px)} 60%{opacity:.5;transform:scale(.8) translateY(0)} }
+    @keyframes slide-in { 0%{transform:translateX(120%);opacity:0} 60%{transform:translateX(-6px);opacity:1} 80%{transform:translateX(4px)} 100%{transform:translateX(0);opacity:1} }
+    @keyframes sonar { 0%{transform:scale(1);opacity:.8} 100%{transform:scale(2.8);opacity:0} }
+    @keyframes speedline { 0%{transform:translateX(110%);opacity:0} 15%{opacity:1} 100%{transform:translateX(-120%);opacity:0} }
+    @keyframes check-pop { 0%{transform:scale(0) rotate(-30deg);opacity:0} 60%{transform:scale(1.3) rotate(8deg);opacity:1} 100%{transform:scale(1) rotate(0);opacity:1} }
+    @keyframes eta-pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+    @keyframes dot-bounce { 0%,80%,100%{transform:scale(.6);opacity:.4} 40%{transform:scale(1);opacity:1} }
+    @keyframes card-in { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes border-glow { 0%,100%{box-shadow:0 0 0 0 rgba(255,152,0,.4)} 50%{box-shadow:0 0 0 8px rgba(255,152,0,0)} }
+    @keyframes border-glow-blue { 0%,100%{box-shadow:0 0 0 0 rgba(33,150,243,.4)} 50%{box-shadow:0 0 0 8px rgba(33,150,243,0)} }
+    @keyframes ripple { 0%{transform:scale(0);opacity:.6} 100%{transform:scale(4);opacity:0} }
+    @keyframes float-star { 0%{transform:translateY(0) scale(1);opacity:1} 100%{transform:translateY(-60px) scale(.5);opacity:0} }
+    @keyframes bar-fill { from{width:0%} }
 
-    /* ── 頂部 ETA ── */
-    .eta-bar {
-      text-align: center;
-      padding: 20px 0 16px;
-      margin-bottom: 16px;
-      border-bottom: 1px solid #222;
-    }
-    .eta-label { font-size: 12px; color: #666; letter-spacing: 1px; text-transform: uppercase; }
-    .eta-time  { font-size: 52px; font-weight: 700; color: #fff; line-height: 1.1; margin: 4px 0; }
-    .eta-sub   { font-size: 13px; color: #555; }
+    .eta-bar { text-align:center; padding:22px 0 18px; margin-bottom:14px; position:relative; }
+    .eta-bar::after { content:''; position:absolute; bottom:0; left:10%; right:10%; height:1px; background:linear-gradient(90deg,transparent,#2a2a3a,transparent); }
+    .eta-label { font-size:11px; color:#555; letter-spacing:2px; text-transform:uppercase; }
+    .eta-time { font-size:56px; font-weight:800; color:#fff; line-height:1.05; margin:6px 0 4px; font-variant-numeric:tabular-nums; text-shadow:0 0 40px rgba(100,160,255,.3); }
+    .eta-time.running { animation:eta-pulse 2s ease-in-out infinite; }
+    .eta-sub { font-size:13px; color:#555; min-height:18px; transition:color .3s; }
+    .eta-sub.active { color:#64b5f6; }
+    .eta-sub.done { color:#66bb6a; }
 
-    /* ── 按鈕 ── */
-    .btn {
-      display: block; width: 100%; padding: 18px;
-      border: none; border-radius: 14px; font-size: 18px; font-weight: 700;
-      cursor: pointer; margin-bottom: 12px; transition: opacity .15s;
-    }
-    .btn:active { opacity: .75; }
-    .btn-depart  { background: #2196F3; color: #fff; }
-    .btn-board   { background: #4CAF50; color: #fff; }
-    .btn-reset   { background: #333; color: #888; font-size: 14px; padding: 12px; }
-    .btn-hidden  { display: none; }
+    .btn { display:block; width:100%; padding:18px; border:none; border-radius:16px; font-size:18px; font-weight:700; cursor:pointer; margin-bottom:10px; position:relative; overflow:hidden; transition:transform .15s; }
+    .btn:active { transform:scale(.97); }
+    .btn-ripple { position:absolute; border-radius:50%; width:60px; height:60px; margin-top:-30px; margin-left:-30px; background:rgba(255,255,255,.3); pointer-events:none; animation:ripple .6s linear; }
+    .btn-depart { background:linear-gradient(135deg,#1565c0,#2196F3); color:#fff; box-shadow:0 4px 20px rgba(33,150,243,.4); }
+    .btn-board { background:linear-gradient(135deg,#2e7d32,#4CAF50); color:#fff; box-shadow:0 4px 20px rgba(76,175,80,.4); animation:border-glow-blue 1.5s infinite; }
+    .btn-reset { background:#1a1a2e; color:#555; font-size:13px; padding:11px; }
+    .btn-hidden { display:none !important; }
 
-    /* ── Timeline ── */
-    .timeline { position: relative; }
-    .leg {
-      display: flex; gap: 14px;
-      padding: 14px 0;
-      border-bottom: 1px solid #1a1a1a;
-      position: relative;
-    }
-    .leg:last-child { border-bottom: none; }
+    .leg { display:flex; gap:14px; padding:14px 0; border-bottom:1px solid #111; animation:card-in .3s ease both; }
+    .leg:last-child { border-bottom:none; }
+    .leg-dot-col { width:32px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; }
+    .dot { width:14px; height:14px; border-radius:50%; background:#1e1e2e; border:2px solid #333; flex-shrink:0; margin-top:4px; z-index:1; transition:all .4s; position:relative; }
+    .dot.done { background:#4CAF50; border-color:#4CAF50; animation:check-pop .4s ease both; }
+    .dot.on-board { background:#2196F3; border-color:#64b5f6; }
+    .dot.on-board::after { content:''; position:absolute; top:-4px; left:-4px; right:-4px; bottom:-4px; border-radius:50%; border:2px solid #2196F3; animation:sonar 1.2s ease-out infinite; }
+    .dot.waiting { background:#FF9800; border-color:#FFB74D; }
+    .dot.waiting::before,.dot.waiting::after { content:''; position:absolute; top:-5px; left:-5px; right:-5px; bottom:-5px; border-radius:50%; border:2px solid rgba(255,152,0,.6); animation:sonar 1.4s ease-out infinite; }
+    .dot.waiting::after { animation-delay:.7s; }
+    .dot.walking { background:#AB47BC; border-color:#CE93D8; }
+    .dot.walking::after { content:''; position:absolute; top:-4px; left:-4px; right:-4px; bottom:-4px; border-radius:50%; border:2px solid rgba(171,71,188,.6); animation:sonar 1.6s ease-out infinite; }
+    .line { width:2px; flex:1; background:#1e1e2e; margin-top:4px; border-radius:1px; transition:background .5s; }
+    .line.done { background:linear-gradient(to bottom,#4CAF50,#66bb6a); }
+    .line.active { background:linear-gradient(to bottom,#2196F3,#1e1e2e); }
 
-    /* 左側圓點 + 線 */
-    .leg-dot-col { width: 32px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
-    .dot {
-      width: 14px; height: 14px; border-radius: 50%;
-      background: #333; border: 2px solid #444;
-      flex-shrink: 0; margin-top: 3px; z-index: 1;
-    }
-    .dot.done     { background: #4CAF50; border-color: #4CAF50; }
-    .dot.active   { background: #2196F3; border-color: #2196F3; animation: pulse 1.4s infinite; }
-    .dot.waiting  { background: #FF9800; border-color: #FF9800; animation: pulse 1.4s infinite; }
-    .line { width: 2px; flex: 1; background: #222; margin-top: 4px; }
-    .line.done { background: #4CAF50; }
+    .leg-card { flex:1; min-width:0; background:#13151f; border:1px solid #1e2030; border-radius:14px; padding:12px 14px; transition:border-color .3s,background .3s; position:relative; overflow:hidden; }
+    .leg-card.status-walking { border-color:#4a2060; background:#16101e; animation:border-glow 2s infinite; }
+    .leg-card.status-waiting { border-color:#5a3a00; background:#1a1408; animation:border-glow 1.8s infinite; }
+    .leg-card.status-on_board { border-color:#1a3a5a; background:#0d1a24; animation:border-glow-blue 2s infinite; }
+    .leg-card.status-completed { border-color:#1a3a1a; background:#0f180f; opacity:.75; }
+    .leg-card.status-pending { opacity:.4; }
 
-    @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(33,150,243,.5); }
-      50%       { box-shadow: 0 0 0 6px rgba(33,150,243,0); }
-    }
+    .leg-name { font-size:15px; font-weight:600; color:#bbb; }
+    .leg-name.walking { color:#CE93D8; }
+    .leg-name.waiting { color:#FFB74D; }
+    .leg-name.on_board { color:#64b5f6; }
+    .leg-name.completed { color:#66bb6a; }
+    .leg-meta { font-size:12px; color:#444; margin-top:3px; }
+    .leg-info { font-size:13px; margin-top:7px; min-height:18px; }
+    .leg-info.walking { color:#CE93D8; }
+    .leg-info.waiting { color:#FFB74D; }
+    .leg-info.on_board { color:#64b5f6; }
+    .leg-info.completed { color:#66bb6a; }
 
-    /* 右側內容 */
-    .leg-body { flex: 1; min-width: 0; }
-    .leg-name  { font-size: 15px; font-weight: 600; color: #ccc; }
-    .leg-name.done    { color: #4CAF50; }
-    .leg-name.active  { color: #fff; }
-    .leg-meta { font-size: 12px; color: #555; margin-top: 2px; }
-    .leg-info { font-size: 13px; color: #999; margin-top: 5px; }
-    .leg-info.active  { color: #2196F3; }
-    .leg-info.waiting { color: #FF9800; }
-    .leg-info.done    { color: #4CAF50; }
-    .leg-times {
-      font-size: 12px; color: #555; margin-top: 4px;
-      display: flex; gap: 8px;
-    }
-    .leg-stop {
-      display: inline-block;
-      background: #1a2a1a; color: #66bb6a;
-      font-size: 11px; padding: 2px 8px;
-      border-radius: 99px; margin-top: 5px;
-    }
+    .progress-track { height:3px; background:#1e2030; border-radius:2px; margin-top:9px; overflow:hidden; }
+    .progress-bar { height:100%; border-radius:2px; transition:width .5s linear; }
+    .progress-bar.walking { background:linear-gradient(90deg,#7b1fa2,#CE93D8); }
+    .progress-bar.on_board { background:linear-gradient(90deg,#1565c0,#64b5f6); }
+    .progress-bar.completed { background:#4CAF50; }
 
-    /* ── icon ── */
-    .type-icon { font-size: 16px; margin-right: 4px; }
+    .leg-times { font-size:11px; color:#444; margin-top:7px; display:flex; gap:10px; flex-wrap:wrap; }
+    .leg-times span { background:#1a1a2e; padding:2px 8px; border-radius:99px; }
 
-    .updated { text-align: center; font-size: 11px; color: #333; margin-top: 20px; }
+    .walk-anim { position:relative; height:28px; margin-top:8px; overflow:hidden; }
+    .walk-figure { position:absolute; font-size:20px; left:20%; animation:walk-bounce .5s ease-in-out infinite; }
+    .footsteps { position:absolute; top:16px; left:0; right:0; }
+    .footstep { display:inline-block; font-size:10px; animation:footstep 1s ease-in-out infinite; }
+    .footstep:nth-child(1){margin-left:8%;animation-delay:0s}
+    .footstep:nth-child(2){margin-left:4%;animation-delay:.25s}
+    .footstep:nth-child(3){margin-left:4%;animation-delay:.5s}
+    .footstep:nth-child(4){margin-left:4%;animation-delay:.75s}
+
+    .wait-anim { position:relative; height:32px; margin-top:8px; overflow:hidden; background:#0d0f18; border-radius:8px; }
+    .wait-track { position:absolute; bottom:9px; left:0; right:0; height:2px; background:repeating-linear-gradient(90deg,#333 0,#333 12px,transparent 12px,transparent 20px); }
+    .wait-vehicle { position:absolute; bottom:7px; font-size:20px; line-height:1; animation:slide-in 2.5s cubic-bezier(.25,.46,.45,.94) infinite; }
+    .wait-pole { position:absolute; bottom:8px; right:24px; font-size:14px; }
+
+    .board-anim { position:relative; height:28px; margin-top:8px; background:#080e18; border-radius:8px; overflow:hidden; }
+    .speed-line { position:absolute; height:2px; border-radius:1px; animation:speedline linear infinite; opacity:0; }
+    .speed-line:nth-child(1){top:7px;left:0;width:60px;background:linear-gradient(90deg,transparent,#1a3a6a,transparent);animation-duration:1.1s;animation-delay:0s}
+    .speed-line:nth-child(2){top:13px;left:0;width:90px;background:linear-gradient(90deg,transparent,#1565c0,transparent);animation-duration:.9s;animation-delay:.3s}
+    .speed-line:nth-child(3){top:19px;left:0;width:40px;background:linear-gradient(90deg,transparent,#1a3a6a,transparent);animation-duration:1.3s;animation-delay:.6s}
+    .speed-line:nth-child(4){top:10px;left:0;width:70px;background:linear-gradient(90deg,transparent,#0d47a1,transparent);animation-duration:.8s;animation-delay:.9s}
+    .board-vehicle { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:18px; }
+
+    .done-badge { display:inline-block; animation:check-pop .5s cubic-bezier(.175,.885,.32,1.275) both; }
+    .dots span { display:inline-block; width:5px; height:5px; border-radius:50%; background:#555; margin:0 2px; animation:dot-bounce 1.2s ease-in-out infinite; }
+    .dots span:nth-child(2){animation-delay:.2s}
+    .dots span:nth-child(3){animation-delay:.4s}
+    .updated { text-align:center; font-size:11px; color:#2a2a3a; margin-top:24px; }
   </style>
 </head>
 <body>
@@ -100,149 +124,167 @@
   <div class="eta-sub" id="eta-sub">按下出發開始模擬</div>
 </div>
 
-<button class="btn btn-depart" id="btn-depart" onclick="depart()">出發！</button>
-<button class="btn btn-board  btn-hidden" id="btn-board" onclick="board()">我上車了 ✓</button>
-<button class="btn btn-reset" id="btn-reset" onclick="reset()">重設行程</button>
+<button class="btn btn-depart" id="btn-depart" onclick="addRipple(event,this);depart()">🚀 出發！</button>
+<button class="btn btn-board btn-hidden" id="btn-board" onclick="addRipple(event,this);board()">✅ 我上車了！</button>
+<button class="btn btn-reset" id="btn-reset" onclick="reset()">↺ 重設行程</button>
 
 <div class="timeline" id="timeline"></div>
 <div class="updated" id="updated"></div>
 
 <script>
-  const ICONS = { walk: "🚶", metro: "🚇", bus: "🚌" };
+const ICONS = { walk:"🚶", metro:"🚇", bus:"🚌" };
+let data = null;
 
-  let data = null;
+function addRipple(e, btn) {
+  const r = document.createElement("span");
+  r.className = "btn-ripple";
+  const rect = btn.getBoundingClientRect();
+  r.style.left = (e.clientX - rect.left) + "px";
+  r.style.top  = (e.clientY - rect.top)  + "px";
+  btn.appendChild(r);
+  setTimeout(() => r.remove(), 700);
+}
 
-  async function fetchStatus() {
-    try {
-      const r = await fetch("/status");
-      data = await r.json();
-      render();
-    } catch(e) {
-      document.getElementById("updated").textContent = "⚠ 連線失敗";
-    }
+async function fetchStatus() {
+  try {
+    const r = await fetch("/status");
+    data = await r.json();
+    render();
+  } catch(e) {
+    document.getElementById("updated").textContent = "⚠ 連線失敗";
+  }
+}
+
+async function depart() { await fetch("/depart",{method:"POST"}); fetchStatus(); }
+async function board()  { await fetch("/board", {method:"POST"}); fetchStatus(); }
+async function reset()  { await fetch("/reset", {method:"POST"}); fetchStatus(); }
+
+function calcProgress(leg) {
+  if (!leg.started_at) return 0;
+  const elapsed = (Date.now() - new Date(leg.started_at).getTime()) / 60000;
+  return Math.min(100, (elapsed / leg.est_min) * 100);
+}
+
+function walkAnimHTML() {
+  return `<div class="walk-anim">
+    <div class="walk-figure">🚶</div>
+    <div class="footsteps">
+      <span class="footstep">👣</span><span class="footstep">👣</span>
+      <span class="footstep">👣</span><span class="footstep">👣</span>
+    </div>
+  </div>`;
+}
+function waitAnimHTML(type) {
+  const veh = type==="bus"?"🚌":"🚇";
+  return `<div class="wait-anim">
+    <div class="wait-track"></div>
+    <div class="wait-vehicle">${veh}</div>
+    <div class="wait-pole">🚏</div>
+  </div>`;
+}
+function boardAnimHTML(type) {
+  const veh = type==="bus"?"🚌":"🚇";
+  return `<div class="board-anim">
+    <div class="speed-line"></div><div class="speed-line"></div>
+    <div class="speed-line"></div><div class="speed-line"></div>
+    <div class="board-vehicle">${veh}</div>
+  </div>`;
+}
+function loadingHTML() {
+  return `<div class="dots"><span></span><span></span><span></span></div>`;
+}
+
+function spawnStars() {
+  for (let i=0; i<14; i++) {
+    setTimeout(() => {
+      const el = document.createElement("div");
+      el.textContent = ["⭐","🎉","✨","🎊"][Math.floor(Math.random()*4)];
+      el.style.cssText = `position:fixed;font-size:${18+Math.random()*14}px;left:${10+Math.random()*80}vw;bottom:20vh;pointer-events:none;z-index:999;animation:float-star .9s ease-out forwards;`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1000);
+    }, i*110);
+  }
+}
+
+let arrivedOnce = false;
+function render() {
+  if (!data) return;
+  const cur = data.current_leg;
+  const running = data.running;
+
+  document.getElementById("eta").textContent = data.eta_str || "--:--";
+  document.getElementById("eta").classList.toggle("running", running);
+
+  const etaSub = document.getElementById("eta-sub");
+  if (!running && cur===-1 && data.legs.every(l=>l.status==="pending")) {
+    etaSub.className="eta-sub"; etaSub.textContent="按下出發開始模擬";
+  } else if (!running) {
+    etaSub.className="eta-sub done"; etaSub.textContent="✅ 已安全抵達！";
+    if (!arrivedOnce) { arrivedOnce=true; spawnStars(); }
+  } else if (cur>=0) {
+    const leg=data.legs[cur];
+    etaSub.className="eta-sub active";
+    etaSub.textContent = leg.status==="walking"?`🚶 步行中：${leg.name}`:
+                         leg.status==="waiting"?`⏳ 等車中：${leg.name}`:
+                         `🚄 行駛中：${leg.name}`;
   }
 
-  async function depart() {
-    await fetch("/depart", { method: "POST" });
-    fetchStatus();
+  document.getElementById("btn-depart").classList.toggle("btn-hidden", running);
+  const btnBoard=document.getElementById("btn-board");
+  btnBoard.classList.add("btn-hidden");
+  if (running && cur>=0 && data.legs[cur].status==="waiting") {
+    btnBoard.classList.remove("btn-hidden");
+    btnBoard.textContent = "✅ 我上" + (data.legs[cur].type==="bus"?"公車":"捷運") + "了！";
   }
 
-  async function board() {
-    await fetch("/board", { method: "POST" });
-    fetchStatus();
-  }
+  document.getElementById("timeline").innerHTML = data.legs.map((leg,i) => {
+    const s=leg.status, isLast=i===data.legs.length-1;
+    const prog=(s==="walking"||s==="on_board")?calcProgress(leg):s==="completed"?100:0;
+    let meta="";
+    if(leg.type==="walk") meta=`步行 ${leg.est_min} 分`;
+    else if(leg.type==="metro") meta=`${leg.from_name} → ${leg.to_name}　約 ${leg.est_min} 分`;
+    else meta=`${leg.from_stop} → ${leg.to_stop}　約 ${leg.est_min} 分`;
 
-  async function reset() {
-    await fetch("/reset", { method: "POST" });
-    fetchStatus();
-  }
+    const anim = s==="walking"?walkAnimHTML():s==="waiting"?waitAnimHTML(leg.type):s==="on_board"?boardAnimHTML(leg.type):"";
+    const info = (s==="walking"||s==="on_board"||s==="waiting")
+      ? `<div class="leg-info ${s}">${leg.info||loadingHTML()}</div>`
+      : s==="completed"?`<div class="leg-info completed"><span class="done-badge">✓</span> 完成</div>`:"";
+    const bar = (s==="walking"||s==="on_board"||s==="completed")
+      ? `<div class="progress-track"><div class="progress-bar ${s==="on_board"?"on_board":s}" style="width:${prog}%"></div></div>` : "";
+    const times=[]; if(leg.boarded_at) times.push("上車 "+leg.boarded_at); if(leg.ended_at) times.push("到站 "+leg.ended_at);
+    const timesH=times.length?`<div class="leg-times">${times.map(t=>`<span>${t}</span>`).join("")}</div>`:"";
 
-  function statusClass(s) {
-    if (s === "completed") return "done";
-    if (s === "on_board")  return "active";
-    if (s === "walking")   return "active";
-    if (s === "waiting")   return "waiting";
-    return "";
-  }
+    const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
+    const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
+    const nameClass=s==="completed"?"completed":s==="on_board"?"on_board":s==="waiting"?"waiting":s==="walking"?"walking":"";
 
-  function render() {
-    if (!data) return;
+    return `<div class="leg" style="animation-delay:${i*.04}s">
+      <div class="leg-dot-col">
+        <div class="${dotCls}"></div>
+        ${isLast?"":` <div class="${lineCls}"></div>`}
+      </div>
+      <div class="leg-card status-${s}">
+        <div class="leg-name ${nameClass}">${ICONS[leg.type]||"•"} ${leg.name}</div>
+        <div class="leg-meta">${meta}</div>
+        ${anim}${info}${bar}${timesH}
+      </div>
+    </div>`;
+  }).join("");
 
-    // ETA
-    document.getElementById("eta").textContent = data.eta_str || "--:--";
+  document.getElementById("updated").textContent = data.updated_at?"更新 "+data.updated_at:"";
+}
 
-    const cur = data.current_leg;
-    const running = data.running;
+setInterval(() => {
+  if (!data||!data.running) return;
+  document.querySelectorAll(".progress-bar.on_board,.progress-bar.walking").forEach(bar => {
+    const idx=[...document.querySelectorAll(".leg-card")].indexOf(bar.closest(".leg-card"));
+    if(idx<0||!data.legs[idx]) return;
+    bar.style.width=Math.min(100,calcProgress(data.legs[idx]))+"%";
+  });
+}, 1000);
 
-    // 狀態副標題
-    if (!running && cur === -1 && data.legs.every(l => l.status === "pending")) {
-      document.getElementById("eta-sub").textContent = "按下出發開始模擬";
-    } else if (!running) {
-      document.getElementById("eta-sub").textContent = "✅ 已抵達目的地！";
-    } else {
-      const leg = data.legs[cur];
-      if (leg) {
-        let sub = "";
-        if (leg.status === "walking") sub = `步行中：${leg.name}`;
-        else if (leg.status === "waiting") sub = `等車中：${leg.name}`;
-        else if (leg.status === "on_board") sub = `行駛中：${leg.name}`;
-        document.getElementById("eta-sub").textContent = sub;
-      }
-    }
-
-    // 按鈕顯示
-    const btnDepart = document.getElementById("btn-depart");
-    const btnBoard  = document.getElementById("btn-board");
-    btnDepart.classList.toggle("btn-hidden", running);
-    btnBoard.classList.toggle("btn-hidden", true);
-    if (running && cur >= 0) {
-      const leg = data.legs[cur];
-      if (leg && leg.status === "waiting") {
-        btnBoard.classList.remove("btn-hidden");
-        btnBoard.textContent = `我上 ${leg.name} 了 ✓`;
-      }
-    }
-
-    // Timeline
-    const tl = document.getElementById("timeline");
-    tl.innerHTML = data.legs.map((leg, i) => {
-      const sc   = statusClass(leg.status);
-      const icon = ICONS[leg.type] || "•";
-      const isLast = i === data.legs.length - 1;
-
-      let metaStr = "";
-      if (leg.type === "walk") {
-        metaStr = `步行 ${leg.est_min} 分`;
-      } else if (leg.type === "metro") {
-        metaStr = `${leg.from_name} → ${leg.to_name}　約 ${leg.est_min} 分`;
-      } else if (leg.type === "bus") {
-        metaStr = `${leg.from_stop} → ${leg.to_stop}　約 ${leg.est_min} 分`;
-      }
-
-      let infoHtml = "";
-      if (leg.info) {
-        infoHtml = `<div class="leg-info ${sc}">${leg.info}</div>`;
-      }
-
-      let stopHtml = "";
-      if (leg.current_stop) {
-        stopHtml = `<span class="leg-stop">📍 ${leg.current_stop}</span>`;
-      }
-
-      let timesHtml = "";
-      if (leg.boarded_at) {
-        timesHtml += `<span>上車 ${leg.boarded_at}</span>`;
-      }
-      if (leg.ended_at) {
-        timesHtml += `<span>到站 ${leg.ended_at}</span>`;
-      }
-
-      const dotCls = sc === "active" ? "dot active" :
-                     sc === "waiting" ? "dot waiting" :
-                     sc === "done" ? "dot done" : "dot";
-      const lineCls = sc === "done" ? "line done" : "line";
-
-      return `
-        <div class="leg">
-          <div class="leg-dot-col">
-            <div class="${dotCls}"></div>
-            ${isLast ? "" : `<div class="${lineCls}"></div>`}
-          </div>
-          <div class="leg-body">
-            <div class="leg-name ${sc}"><span class="type-icon">${icon}</span>${leg.name}</div>
-            <div class="leg-meta">${metaStr}</div>
-            ${infoHtml}
-            ${stopHtml}
-            ${timesHtml ? `<div class="leg-times">${timesHtml}</div>` : ""}
-          </div>
-        </div>`;
-    }).join("");
-
-    document.getElementById("updated").textContent = "更新：" + data.updated_at;
-  }
-
-  fetchStatus();
-  setInterval(fetchStatus, 5000);
+fetchStatus();
+setInterval(fetchStatus, 5000);
 </script>
 </body>
 </html>
