@@ -284,6 +284,34 @@ function render() {
     btnBoard.textContent = "✅ 我上" + (data.legs[cur].type==="bus"?"公車":"捷運") + "了！";
   }
 
+  // 狀態有變才重建 DOM，否則只更新文字，避免動畫重播
+  const timeline = document.getElementById("timeline");
+  const firstBuild = !timeline.children.length;
+  const statusChanged = data.legs.some((l,i) => l.status !== (_prevStatuses[i]||""));
+  if (firstBuild || statusChanged) {
+    _buildTimeline(firstBuild);
+  } else {
+    _updateTimelineDynamic();
+  }
+
+  document.getElementById("updated").textContent = data.updated_at?"更新 "+data.updated_at:"";
+}
+}
+
+let _prevStatuses = [];
+
+function _updateTimelineDynamic() {
+  data.legs.forEach((leg, i) => {
+    const s = leg.status;
+    const infoEl = document.getElementById(`leg-info-${i}`);
+    if (!infoEl) return;
+    if (s === "walking" || s === "on_board" || s === "waiting") {
+      infoEl.innerHTML = leg.info || loadingHTML();
+    }
+  });
+}
+
+function _buildTimeline(firstBuild) {
   document.getElementById("timeline").innerHTML = data.legs.map((leg,i) => {
     const s=leg.status, isLast=i===data.legs.length-1;
     const prog=(s==="walking"||s==="on_board")?calcProgress(leg):s==="completed"?100:0;
@@ -294,8 +322,9 @@ function render() {
 
     const anim = s==="walking"?walkAnimHTML():s==="waiting"?waitAnimHTML(leg.type):s==="on_board"?boardAnimHTML(leg.type):"";
     const info = (s==="walking"||s==="on_board"||s==="waiting")
-      ? `<div class="leg-info ${s}">${leg.info||loadingHTML()}</div>`
-      : s==="completed"?`<div class="leg-info completed"><span class="done-badge">✓</span> 完成</div>`:"";
+      ? `<div class="leg-info ${s}" id="leg-info-${i}">${leg.info||loadingHTML()}</div>`
+      : s==="completed"?`<div class="leg-info completed" id="leg-info-${i}"><span class="done-badge">✓</span> 完成</div>`
+      : `<div id="leg-info-${i}"></div>`;
     const bar = (s==="walking"||s==="on_board"||s==="completed")
       ? `<div class="progress-track"><div class="progress-bar ${s==="on_board"?"on_board":s}" style="width:${prog}%"></div></div>` : "";
     const times=[]; if(leg.boarded_at) times.push("上車 "+leg.boarded_at); if(leg.ended_at) times.push("到站 "+leg.ended_at);
@@ -304,8 +333,9 @@ function render() {
     const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
     const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
     const nameClass=s==="completed"?"completed":s==="on_board"?"on_board":s==="waiting"?"waiting":s==="walking"?"walking":"";
+    const animStyle = firstBuild ? `animation-delay:${i*.04}s` : `animation:none`;
 
-    return `<div class="leg" style="animation-delay:${i*.04}s">
+    return `<div class="leg" style="${animStyle}">
       <div class="leg-dot-col">
         <div class="${dotCls}"></div>
         ${isLast?"":` <div class="${lineCls}"></div>`}
@@ -317,8 +347,7 @@ function render() {
       </div>
     </div>`;
   }).join("");
-
-  document.getElementById("updated").textContent = data.updated_at?"更新 "+data.updated_at:"";
+  _prevStatuses = data.legs.map(l => l.status);
 }
 
 setInterval(() => {
@@ -338,6 +367,9 @@ setInterval(fetchStatus, 5000);
 // ════════════════════════════════
 let leafMap   = null;
 let routeLine = null;
+let routeMarkers = [];
+let routeFitted = false;
+let _prevWaypointIds = "";
 let doneLines = [];   // completed legs (green)
 let charMarker = null;
 let mapReady  = false;
@@ -397,21 +429,32 @@ function initLeafMap() {
 
 function drawRoute() {
   if (!leafMap || !mapData || !mapData.waypoints || mapData.waypoints.length < 2) return;
-  const pts = mapData.waypoints.map(w => [w.lat, w.lng]);
+
+  // waypoints 沒變就不重畫（避免地圖跳回、marker 堆疊）
+  const ids = mapData.waypoints.map(w => w.id).join(",");
+  if (ids === _prevWaypointIds) return;
+  _prevWaypointIds = ids;
 
   if (routeLine) { routeLine.remove(); routeLine = null; }
+  routeMarkers.forEach(m => m.remove()); routeMarkers = [];
 
+  const pts = mapData.waypoints.map(w => [w.lat, w.lng]);
   routeLine = L.polyline(pts, {color:"#1565c0", weight:3, opacity:.6, dashArray:"8,6"}).addTo(leafMap);
 
   mapData.waypoints.forEach((w, i) => {
     const isEnd = i===0 || i===mapData.waypoints.length-1;
-    L.circleMarker([w.lat, w.lng], {
+    const m = L.circleMarker([w.lat, w.lng], {
       radius: isEnd?8:5, color:"#fff", weight:2,
       fillColor: isEnd?"#FF9800":"#1565c0", fillOpacity:1
     }).bindTooltip(w.name, {direction:"top"}).addTo(leafMap);
+    routeMarkers.push(m);
   });
 
-  leafMap.fitBounds(routeLine.getBounds(), {padding:[24,24]});
+  // 只有第一次才 fitBounds，之後讓使用者自由縮放
+  if (!routeFitted) {
+    leafMap.fitBounds(routeLine.getBounds(), {padding:[24,24]});
+    routeFitted = true;
+  }
 }
 
 function getCharIcon(type, status) {
