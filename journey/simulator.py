@@ -213,7 +213,7 @@ STATUS    = {
     "updated_at": "",
     "error": ""
 }
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def now_str():
@@ -431,22 +431,17 @@ def poll_loop():
                     lstatus = leg["status"]
 
                 if ltype == "walk" and lstatus == "walking":
-                    with _lock:
-                        update_walk_leg(leg)
+                    update_walk_leg(leg)
                 elif ltype == "metro":
                     if lstatus == "waiting":
-                        with _lock:
-                            update_metro_waiting(leg)
+                        update_metro_waiting(leg)
                     elif lstatus == "on_board":
-                        with _lock:
-                            update_metro_on_board(leg)
+                        update_metro_on_board(leg)
                 elif ltype == "bus":
                     if lstatus == "waiting":
-                        with _lock:
-                            update_bus_waiting(leg)
+                        update_bus_waiting(leg)
                     elif lstatus == "on_board":
-                        with _lock:
-                            update_bus_on_board(leg)
+                        update_bus_on_board(leg)
                 recalculate_eta()
         except Exception as e:
             with _lock:
@@ -457,6 +452,15 @@ def poll_loop():
 # ── Flask ────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder=DIR)
+
+
+@app.after_request
+def disable_browser_cache(response):
+    """開發用：避免瀏覽器持續使用修正前的 HTML/API 回應。"""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.route("/")
@@ -487,7 +491,11 @@ def depart():
             leg["current_stop"] = ""
             leg["started_at"]   = ""
             leg["ended_at"]     = ""
+            leg["boarded_at"]   = ""
+            leg["lat"]          = None
+            leg["lng"]          = None
     advance_to_next_leg()
+    recalculate_eta()
     return jsonify({"ok": True})
 
 
@@ -503,11 +511,19 @@ def reset():
         STATUS["running"]     = False
         STATUS["current_leg"] = -1
         STATUS["eta_str"]     = "--:--"
+        STATUS["started_at"]  = None
+        STATUS["updated_at"]  = now_str()
+        STATUS["error"]       = ""
         for leg in STATUS["legs"]:
-            leg["status"] = "pending"
-            leg["info"]   = ""
-            leg["lat"]    = None
-            leg["lng"]    = None
+            leg["status"]       = "pending"
+            leg["info"]         = ""
+            leg["vehicle_id"]   = ""
+            leg["current_stop"] = ""
+            leg["started_at"]   = ""
+            leg["ended_at"]     = ""
+            leg["boarded_at"]   = ""
+            leg["lat"]          = None
+            leg["lng"]          = None
     return jsonify({"ok": True})
 
 

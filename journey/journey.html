@@ -181,6 +181,8 @@
 <script>
 const ICONS = { walk:"🚶", metro:"🚇", bus:"🚌" };
 let data = null;
+let statusRequestPending = false;
+let mapRequestPending = false;
 
 function addRipple(e, btn) {
   const r = document.createElement("span");
@@ -193,26 +195,41 @@ function addRipple(e, btn) {
 }
 
 async function fetchStatus() {
+  if (statusRequestPending) return;
+  statusRequestPending = true;
   try {
-    const r = await fetch("/status");
+    const r = await fetch("/status", {cache:"no-store"});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     data = await r.json();
     render();
   } catch(e) {
-    document.getElementById("updated").textContent = "⚠ 連線失敗";
+    document.getElementById("updated").textContent = `⚠ 連線失敗：${e.message}`;
+  } finally {
+    statusRequestPending = false;
   }
 }
 
 async function depart() {
-  try { await fetch("/depart",{method:"POST"}); } catch(e) { alert("出發失敗: " + e.message); return; }
-  fetchStatus();
+  await postAction("/depart", "出發失敗");
 }
 async function board()  {
-  try { await fetch("/board", {method:"POST"}); } catch(e) {}
-  fetchStatus();
+  await postAction("/board", "上車失敗");
 }
 async function reset()  {
-  try { await fetch("/reset", {method:"POST"}); } catch(e) {}
-  fetchStatus();
+  arrivedOnce = false;
+  await postAction("/reset", "重設失敗");
+}
+
+async function postAction(url, errorLabel) {
+  try {
+    const r = await fetch(url, {method:"POST", cache:"no-store"});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const result = await r.json();
+    if (result.ok === false) throw new Error(result.msg || "操作未完成");
+    await fetchStatus();
+  } catch(e) {
+    document.getElementById("updated").textContent = `⚠ ${errorLabel}：${e.message}`;
+  }
 }
 
 function calcProgress(leg) {
@@ -314,7 +331,8 @@ function _updateTimelineDynamic() {
     const infoEl = document.getElementById(`leg-info-${i}`);
     if (!infoEl) return;
     if (s === "walking" || s === "on_board" || s === "waiting") {
-      infoEl.innerHTML = leg.info || loadingHTML();
+      const nextInfo = leg.info || loadingHTML();
+      if (infoEl.innerHTML !== nextInfo) infoEl.innerHTML = nextInfo;
     }
   });
 }
@@ -341,9 +359,9 @@ function _buildTimeline(firstBuild) {
     const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
     const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
     const nameClass=s==="completed"?"completed":s==="on_board"?"on_board":s==="waiting"?"waiting":s==="walking"?"walking":"";
-    const animStyle = firstBuild ? `style="animation-delay:${i*.04}s"` : ``;
+    const animStyle = firstBuild ? ` style="animation-delay:${i*.04}s"` : "";
 
-    return `<div class="leg" ${animStyle}>`;
+    return `<div class="leg"${animStyle}>
       <div class="leg-dot-col">
         <div class="${dotCls}"></div>
         ${isLast?"":` <div class="${lineCls}"></div>`}
@@ -388,8 +406,11 @@ let curLat = null, curLng = null;
 let tgtLat = null, tgtLng = null;
 
 async function fetchMapData() {
+  if (mapRequestPending) return;
+  mapRequestPending = true;
   try {
-    const r = await fetch("/map-data");
+    const r = await fetch("/map-data", {cache:"no-store"});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     mapData = await r.json();
     if (mapReady && mapData.waypoints && mapData.waypoints.length >= 2) {
       drawRoute();
@@ -398,6 +419,8 @@ async function fetchMapData() {
   } catch(e) {
     document.getElementById("map-hint").textContent = "⚠ 無法連線到伺服器（" + e.message + ")";
     document.getElementById("map-hint").style.display = "";
+  } finally {
+    mapRequestPending = false;
   }
 }
 
@@ -481,7 +504,14 @@ function moveTo(lat, lng) {
 function updateCharMarker() {
   if (!data || !leafMap || !mapData) return;
   const cur = data.current_leg;
-  if (!data.running || cur < 0) return;
+  if (!data.running || cur < 0) {
+    if (charMarker) {
+      charMarker.remove();
+      charMarker = null;
+    }
+    curLat = curLng = tgtLat = tgtLng = null;
+    return;
+  }
 
   const leg = data.legs[cur];
   const s   = leg.status;
