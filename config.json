@@ -1,0 +1,14 @@
+{
+    "client_id": "使用 GitHub Secrets",
+    "client_secret": "使用 GitHub Secrets",
+    "city": "NewTaipei",
+    "route": "813",
+    "board_stop": "看守所",
+    "exit_stop": "中原中平路口",
+    "direction": 1,
+    "work_time": "09:00",
+    "walk_minutes": 15,
+    "poll_interval": 30,
+    "start_hour": 7,
+    "end_hour": 10
+}

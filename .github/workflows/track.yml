@@ -1,0 +1,41 @@
+name: 813 公車追蹤
+
+on:
+  schedule:
+    # 每週一到週五 台灣時間 06:55 (UTC 22:55 前一天)
+    - cron: '55 22 * * 0-4'
+  workflow_dispatch:   # 可以手動觸發測試
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90    # 最多跑 90 分鐘
+
+    permissions:
+      contents: write      # 允許把 CSV 結果 commit 回 repo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run bus tracker
+        env:
+          TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+          TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+        run: python tracker.py
+
+      - name: Commit results
+        run: |
+          git config user.name "Bus Tracker Bot"
+          git config user.email "bot@noreply.github.com"
+          git add travel_log.csv
+          git diff --staged --quiet || git commit -m "bus: $(date +'%Y-%m-%d') 追蹤結果"
+          git push

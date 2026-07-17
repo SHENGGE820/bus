@@ -1,0 +1,55 @@
+公車通勤時間追蹤器 - 使用說明
+路線：813路  看守所 → 中原中平路口
+========================================
+
+【第一步：申請 TDX API 帳號】
+1. 前往 https://tdx.transportdata.tw/
+2. 點選右上角「註冊」，用 Email 免費申請
+3. 登入後進入「個人資料」→「金鑰申請」
+4. 申請一組 client_id 和 client_secret（免費方案每天 50 次請求以上，足夠使用）
+5. 把兩組金鑰填入 config.json 對應欄位
+
+【第二步：安裝 Python 套件】
+在這個資料夾開啟 PowerShell，輸入：
+    pip install -r requirements.txt
+
+【第三步：確認站牌名稱正確】
+執行以下指令，確認站名和方向：
+    python tracker.py --list-stops
+
+看到清單後，確認「上車站」和「下車站」有被標記 ← 符號。
+若沒有顯示，可以試著把 config.json 的 direction 改為 1（返程）再查一次。
+
+【第四步：開始追蹤】
+    python tracker.py
+
+程式會在每天早上 07:00 開始監聽公車，偵測到公車進站後自動計時。
+所有記錄會存在 travel_log.csv，每天都會累積資料。
+
+【第五步：設定自動排程（可選）】
+想要電腦在每天 07:00 自動開跑：
+1. 開啟「工作排程器」（搜尋 Task Scheduler）
+2. 建立基本工作 → 每日 07:00 觸發
+3. 動作：啟動程式
+   程式：python
+   引數：C:\Users\daoso\Downloads\-The-Adventure-of-Atiliia-main\bus\tracker.py
+   開始位置：C:\Users\daoso\Downloads\-The-Adventure-of-Atiliia-main\bus
+
+【設定說明（config.json）】
+  city          : 城市代碼（新北市=NewTaipei，台北市=Taipei）
+  route         : 路線號碼
+  board_stop    : 上車站名（要完全一致，用 --list-stops 確認）
+  exit_stop     : 下車站名
+  direction     : 0=去程，1=返程
+  work_time     : 上班時間（24小時制）
+  walk_minutes  : 從家走到站牌的分鐘數
+  poll_interval : 每幾秒查詢一次 API（建議 30，太短容易超過免費額度）
+  start_hour    : 幾點開始追蹤（7=07:00）
+  end_hour      : 幾點停止追蹤（10=10:00）
+
+【輸出說明】
+執行中畫面會即時顯示：
+  - 下一班公車預計幾分後到站
+  - 建議幾點出門
+  - 追蹤到目標公車後的行駛分鐘數
+  - 累積資料後的統計結果：平均/最慢/最快時間、最晚出門時間
