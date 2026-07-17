@@ -1,0 +1,80 @@
+{
+    "title": "百達醫企業 → 青和街546號",
+    "total_est_min": 76,
+    "legs": [
+        {
+            "id": 1,
+            "type": "walk",
+            "name": "走到新莊副都心站",
+            "est_min": 6,
+            "distance_m": 280,
+            "notes": "往東北走新北大道四段 → 向右轉走樓梯 → 從2號進站"
+        },
+        {
+            "id": 2,
+            "type": "metro",
+            "name": "機場捷運（普通車）",
+            "system": "TYMC",
+            "line_id": "A",
+            "from_id": "A4",
+            "from_name": "新莊副都心",
+            "to_id": "A3",
+            "to_name": "新北產業園區",
+            "direction": 1,
+            "headsign": "台北車站",
+            "est_min": 3,
+            "est_stops": 1
+        },
+        {
+            "id": 3,
+            "type": "walk",
+            "name": "站內換乘環狀線",
+            "est_min": 2,
+            "distance_m": 100,
+            "notes": "走樓梯換月台"
+        },
+        {
+            "id": 4,
+            "type": "metro",
+            "name": "環狀線",
+            "system": "TRTC",
+            "line_id": "Y",
+            "from_id": "Y20",
+            "from_name": "新北產業園區",
+            "to_id": "Y13",
+            "to_name": "橋和",
+            "direction": 1,
+            "headsign": "大坪林",
+            "est_min": 17,
+            "est_stops": 7
+        },
+        {
+            "id": 5,
+            "type": "walk",
+            "name": "出站到公車站",
+            "est_min": 3,
+            "distance_m": 65,
+            "notes": "從Qiaohe出站 → 走樓梯 → 步行到捷運橋和站公車站"
+        },
+        {
+            "id": 6,
+            "type": "bus",
+            "name": "262路",
+            "city": "NewTaipei",
+            "route": "262",
+            "direction": 0,
+            "from_stop": "捷運橋和站",
+            "to_stop": "臺灣新北地方法院(金城)",
+            "est_min": 18,
+            "est_stops": 13
+        },
+        {
+            "id": 7,
+            "type": "walk",
+            "name": "走到目的地",
+            "est_min": 9,
+            "distance_m": 600,
+            "notes": "朝青雲路 → 左轉青雲路 → 右轉清水路98巷 → 靠左進青和街"
+        }
+    ]
+}
