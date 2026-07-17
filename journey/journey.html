@@ -390,9 +390,17 @@ function render() {
 
 let _prevStatuses = [];
 
+function legMeta(leg) {
+  if (leg.type === "walk") return `步行 ${leg.est_min} 分`;
+  if (leg.type === "metro") return `${leg.from_name} → ${leg.to_name}　約 ${leg.est_min} 分`;
+  return `${leg.from_stop} → ${leg.to_stop}　約 ${leg.est_min} 分`;
+}
+
 function _updateTimelineDynamic() {
   data.legs.forEach((leg, i) => {
     const s = leg.status;
+    const metaEl = document.getElementById(`leg-meta-${i}`);
+    if (metaEl) metaEl.textContent = legMeta(leg);
     const infoEl = document.getElementById(`leg-info-${i}`);
     if (!infoEl) return;
     if (s === "walking" || s === "on_board" || s === "waiting") {
@@ -406,10 +414,7 @@ function _buildTimeline(firstBuild) {
   document.getElementById("timeline").innerHTML = data.legs.map((leg,i) => {
     const s=leg.status, isLast=i===data.legs.length-1;
     const prog=(s==="walking"||s==="on_board")?calcProgress(leg):s==="completed"?100:0;
-    let meta="";
-    if(leg.type==="walk") meta=`步行 ${leg.est_min} 分`;
-    else if(leg.type==="metro") meta=`${leg.from_name} → ${leg.to_name}　約 ${leg.est_min} 分`;
-    else meta=`${leg.from_stop} → ${leg.to_stop}　約 ${leg.est_min} 分`;
+    const meta=legMeta(leg);
 
     const anim = s==="walking"?walkAnimHTML():s==="waiting"?waitAnimHTML(leg.type):s==="on_board"?boardAnimHTML(leg.type):"";
     const info = (s==="walking"||s==="on_board"||s==="waiting")
@@ -433,7 +438,7 @@ function _buildTimeline(firstBuild) {
       </div>
       <div class="leg-card status-${s}">
         <div class="leg-name ${nameClass}">${ICONS[leg.type]||"•"} ${leg.name}</div>
-        <div class="leg-meta">${meta}</div>
+        <div class="leg-meta" id="leg-meta-${i}">${meta}</div>
         ${anim}${info}${bar}${timesH}
       </div>
     </div>`;
