@@ -202,9 +202,18 @@ async function fetchStatus() {
   }
 }
 
-async function depart() { await fetch("/depart",{method:"POST"}); fetchStatus(); }
-async function board()  { await fetch("/board", {method:"POST"}); fetchStatus(); }
-async function reset()  { await fetch("/reset", {method:"POST"}); fetchStatus(); }
+async function depart() {
+  try { await fetch("/depart",{method:"POST"}); } catch(e) { alert("出發失敗: " + e.message); return; }
+  fetchStatus();
+}
+async function board()  {
+  try { await fetch("/board", {method:"POST"}); } catch(e) {}
+  fetchStatus();
+}
+async function reset()  {
+  try { await fetch("/reset", {method:"POST"}); } catch(e) {}
+  fetchStatus();
+}
 
 function calcProgress(leg) {
   if (!leg.started_at) return 0;
@@ -332,9 +341,9 @@ function _buildTimeline(firstBuild) {
     const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
     const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
     const nameClass=s==="completed"?"completed":s==="on_board"?"on_board":s==="waiting"?"waiting":s==="walking"?"walking":"";
-    const animStyle = firstBuild ? `animation-delay:${i*.04}s` : `animation:none`;
+    const animStyle = firstBuild ? `animation-delay:${i*.04}s` : ``;
 
-    return `<div class="leg" style="${animStyle}">
+    return `<div class="leg"${animStyle ? ` style="${animStyle}"` : ``}>
       <div class="leg-dot-col">
         <div class="${dotCls}"></div>
         ${isLast?"":` <div class="${lineCls}"></div>`}
