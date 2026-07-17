@@ -14,7 +14,7 @@ import os
 import sys
 import socket
 import requests
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 # ── 路徑 ────────────────────────────────────────────────────
 DIR         = os.path.dirname(os.path.abspath(__file__))
@@ -214,6 +214,7 @@ STATUS    = {
     "running": False,
     "current_leg": -1,
     "legs": [],
+    "height_cm": 170.0,
     "started_at": None,
     "eta_str": "--:--",
     "updated_at": "",
@@ -233,6 +234,16 @@ def ts():
 def eta_from_now(remaining_min):
     t = datetime.datetime.now() + datetime.timedelta(minutes=remaining_min)
     return t.strftime("%H:%M")
+
+
+def apply_height_to_walk_legs(height_cm):
+    """以 170 cm 為原始步行時間基準，依步幅近似比例調整。"""
+    factor = 170.0 / height_cm
+    with _lock:
+        STATUS["height_cm"] = height_cm
+        for leg in STATUS["legs"]:
+            if leg["type"] == "walk":
+                leg["est_min"] = round(leg["base_est_min"] * factor, 1)
 
 
 def recalculate_eta():
@@ -557,6 +568,38 @@ def board():
     return jsonify({"ok": ok})
 
 
+@app.route("/settings", methods=["POST"])
+def settings():
+    payload = request.get_json(silent=True) or {}
+    try:
+        height_cm = float(payload.get("height_cm"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "msg": "身高必須是數字"}), 400
+    if not 120 <= height_cm <= 220:
+        return jsonify({"ok": False, "msg": "身高請輸入 120–220 公分"}), 400
+    apply_height_to_walk_legs(height_cm)
+    with _lock:
+        running = STATUS["running"]
+        cur = STATUS["current_leg"]
+        active_walk = (
+            STATUS["legs"][cur]
+            if running and cur >= 0 and STATUS["legs"][cur]["status"] == "walking"
+            else None
+        )
+    if active_walk:
+        update_walk_leg(active_walk)
+    if running:
+        recalculate_eta()
+    else:
+        with _lock:
+            STATUS["eta_str"] = "--:--"
+    return jsonify({
+        "ok": True,
+        "height_cm": STATUS["height_cm"],
+        "walk_factor": round(170.0 / height_cm, 3),
+    })
+
+
 @app.route("/reset", methods=["POST"])
 def reset():
     with _lock:
@@ -615,6 +658,7 @@ def init():
                 "type":         leg["type"],
                 "name":         leg["name"],
                 "est_min":      leg["est_min"],
+                "base_est_min": leg["est_min"],
                 "system":       leg.get("system", ""),
                 "line_id":      leg.get("line_id", ""),
                 "from_id":      leg.get("from_id", ""),
