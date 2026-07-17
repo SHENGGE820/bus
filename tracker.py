@@ -1,8 +1,8 @@
 ﻿#!/usr/bin/env python3
 """
-公車通勤時間追蹤器 - 813路
-早上：看守所 → 中原中平路口（每台各別追蹤 + 班距統計）
-晚上：中原路  → 看守所        （每台各別追蹤 + 班距統計）
+813路公車動態追蹤器
+早上：看守所 -> 中原中平路口
+晚上：中原路 -> 看守所
 """
 
 import requests
@@ -14,9 +14,10 @@ import os
 import sys
 from collections import defaultdict
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
 LOG_FILE    = os.path.join(SCRIPT_DIR, "travel_log.csv")
+STATUS_FILE = os.path.join(SCRIPT_DIR, "status.json")
 
 IS_CLOUD = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -26,8 +27,6 @@ TDX_BASE      = "https://tdx.transportdata.tw/api/basic/v2/Bus"
 _cached_token = None
 _token_expiry = None
 
-
-# ── 設定 ────────────────────────────────────────────────────
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -41,8 +40,6 @@ def load_config():
         cfg["client_secret"] = os.environ["TDX_CLIENT_SECRET"]
     return cfg
 
-
-# ── TDX API ──────────────────────────────────────────────────
 
 def get_token(cfg):
     global _cached_token, _token_expiry
@@ -69,8 +66,7 @@ def tdx_get(path, cfg, params=None):
     r = requests.get(
         f"{TDX_BASE}/{path}",
         headers={"Authorization": f"Bearer {token}"},
-        params=p,
-        timeout=10
+        params=p, timeout=10
     )
     r.raise_for_status()
     return r.json()
@@ -79,21 +75,17 @@ def tdx_get(path, cfg, params=None):
 def get_realtime_near_stop(cfg, direction):
     return tdx_get(
         f"RealTimeNearStop/City/{cfg['city']}/{cfg['route']}",
-        cfg,
-        {"$filter": f"Direction eq {direction}"}
+        cfg, {"$filter": f"Direction eq {direction}"}
     )
 
 
 def get_next_bus_eta(cfg, direction, stop_name):
-    """取得下一班公車預計到站秒數與車牌"""
     try:
         data = tdx_get(
             f"EstimatedTimeOfArrival/City/{cfg['city']}/{cfg['route']}",
             cfg,
-            {
-                "$filter":  f"StopName/Zh_tw eq '{stop_name}' and Direction eq {direction}",
-                "$orderby": "EstimateTime asc"
-            }
+            {"$filter":  f"StopName/Zh_tw eq '{stop_name}' and Direction eq {direction}",
+             "$orderby": "EstimateTime asc"}
         )
         if data:
             return data[0].get("EstimateTime"), data[0].get("PlateNumb", "?")
@@ -103,25 +95,27 @@ def get_next_bus_eta(cfg, direction, stop_name):
 
 
 def list_stops(cfg):
-    """列出各時段站牌清單"""
     for sess in cfg["sessions"]:
         data = tdx_get(
             f"StopOfRoute/City/{cfg['city']}/{cfg['route']}",
-            cfg,
-            {"$filter": f"Direction eq {sess['direction']}"}
+            cfg, {"$filter": f"Direction eq {sess['direction']}"}
         )
         if not data:
             continue
         stops = data[0].get("Stops", [])
-        print(f"\n【{sess['name']}】方向 {sess['direction']}  共 {len(stops)} 站")
+        print(f"\n[{sess['name']}] 方向 {sess['direction']}  共 {len(stops)} 站")
         for i, s in enumerate(stops, 1):
             n  = s.get("StopName", {}).get("Zh_tw", "?")
-            mk = "  ← 上車站" if n == sess["board_stop"] else (
-                 "  ← 下車站" if n == sess["exit_stop"] else "")
+            mk = "  <- 上車站" if n == sess["board_stop"] else (
+                 "  <- 下車站" if n == sess["exit_stop"] else "")
             print(f"  {i:>3}. {n}{mk}")
 
 
-# ── 紀錄與統計 ───────────────────────────────────────────────
+def write_status(day_status):
+    day_status["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(day_status, f, ensure_ascii=False, indent=2)
+
 
 def save_log(date_str, session_name, plate, board_t, exit_t, minutes):
     exists = os.path.exists(LOG_FILE)
@@ -130,13 +124,12 @@ def save_log(date_str, session_name, plate, board_t, exit_t, minutes):
         if not exists:
             w.writerow(["日期", "時段", "車牌", "上車時間", "下車時間", "行駛分鐘"])
         w.writerow([date_str, session_name, plate, board_t, exit_t, f"{minutes:.1f}"])
-    print(f"\n  ✅ 記錄：[{session_name}] {plate} | {board_t} → {exit_t} | {minutes:.1f} 分鐘")
+    print(f"\n  [記錄] [{session_name}] {plate} | {board_t} -> {exit_t} | {minutes:.1f} 分鐘")
 
 
 def show_stats(cfg):
     if not os.path.exists(LOG_FILE):
         return
-
     data_by_session = defaultdict(list)
     with open(LOG_FILE, "r", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -144,12 +137,10 @@ def show_stats(cfg):
                 data_by_session[row["時段"]].append(float(row["行駛分鐘"]))
             except (ValueError, KeyError):
                 pass
-
     if not data_by_session:
         return
-
     print()
-    print("━" * 50)
+    print("-" * 50)
     for sess in cfg["sessions"]:
         name      = sess["name"]
         durations = data_by_session.get(name, [])
@@ -158,8 +149,8 @@ def show_stats(cfg):
         avg   = sum(durations) / len(durations)
         worst = max(durations)
         best  = min(durations)
-        print(f"  📊 【{name}】{sess['board_stop']} → {sess['exit_stop']}（{len(durations)} 筆）")
-        print(f"     平均 {avg:.0f} 分 ｜ 最快 {best:.0f} 分 ｜ 最慢 {worst:.0f} 分")
+        print(f"  [{name}] {sess['board_stop']} -> {sess['exit_stop']} ({len(durations)} 筆)")
+        print(f"     平均 {avg:.0f} 分 | 最快 {best:.0f} 分 | 最慢 {worst:.0f} 分")
         if "work_time" in sess:
             wh, wm   = map(int, sess["work_time"].split(":"))
             work_min = wh * 60 + wm
@@ -168,23 +159,23 @@ def show_stats(cfg):
             dm = int((work_min - worst - 5 - walk) % 60)
             ah = int((work_min - avg  - 5 - walk) // 60)
             am = int((work_min - avg  - 5 - walk) % 60)
-            print(f"     最晚出門：{dh:02d}:{dm:02d}  ｜  平均出門：{ah:02d}:{am:02d}")
+            print(f"     最晚出門：{dh:02d}:{dm:02d}  |  平均出門：{ah:02d}:{am:02d}")
         print()
-    print("━" * 50)
+    print("-" * 50)
 
 
-# ── 單一時段追蹤 ─────────────────────────────────────────────
-
-def run_session(cfg, sess, today):
+def run_session(cfg, sess, today, day_status):
     name       = sess["name"]
     direction  = sess["direction"]
     board_stop = sess["board_stop"]
     exit_stop  = sess["exit_stop"]
 
-    active      = {}   # plate -> board_datetime
-    board_times = []   # 每次公車進站時間，用於計算班距
+    active       = {}   # plate -> board_datetime
+    board_times  = []
+    current_stop = {}   # plate -> {"stop": 站名, "seq": 序號}
+    sess_status  = day_status["sessions"][name]
 
-    print(f"\n🚌 【{name}】{board_stop} → {exit_stop}  (方向 {direction})")
+    print(f"\n[{name}] {board_stop} -> {exit_stop}  (方向 {direction})")
     print(f"   每 {cfg['poll_interval']} 秒刷新，Ctrl+C 中止\n")
 
     while True:
@@ -199,15 +190,14 @@ def run_session(cfg, sess, today):
         try:
             near = get_realtime_near_stop(cfg, direction)
         except Exception as e:
-            print(f"[{ts}] ⚠ API 錯誤：{e}")
+            print(f"[{ts}] API 錯誤：{e}")
             time.sleep(cfg["poll_interval"])
             continue
 
         # 偵測新公車進站（上車站）
-        at_board = [b for b in near
+        for bus in [b for b in near
                     if b.get("StopName", {}).get("Zh_tw", "") == board_stop
-                    and b.get("A2EventType") == 0]
-        for bus in at_board:
+                    and b.get("A2EventType") == 0]:
             plate = bus.get("PlateNumb", "unknown")
             if plate not in active:
                 active[plate] = now_local
@@ -215,66 +205,79 @@ def run_session(cfg, sess, today):
                 gap_str = ""
                 if len(board_times) >= 2:
                     gap = (board_times[-1] - board_times[-2]).total_seconds() / 60
-                    gap_str = f"  （距上班 {gap:.0f} 分鐘）"
-                print(f"\n[{ts}] 🟢 第 {len(board_times)} 班  {plate} 進站 {board_stop}{gap_str}")
+                    gap_str = f"  (距上班 {gap:.0f} 分鐘)"
+                print(f"\n[{ts}] 第 {len(board_times)} 班  {plate} 進站 {board_stop}{gap_str}")
 
         # 偵測追蹤中的公車抵達（下車站）
-        at_exit = [b for b in near
-                   if b.get("StopName", {}).get("Zh_tw", "") == exit_stop
-                   and b.get("A2EventType") == 0
-                   and b.get("PlateNumb", "") in active]
-        for bus in at_exit:
+        for bus in [b for b in near
+                    if b.get("StopName", {}).get("Zh_tw", "") == exit_stop
+                    and b.get("A2EventType") == 0
+                    and b.get("PlateNumb", "") in active]:
             plate    = bus.get("PlateNumb", "")
             board_dt = active.pop(plate)
             duration = (now_local - board_dt).total_seconds() / 60
-            print(f"[{ts}] 🏁 {plate} 抵達 {exit_stop}，共 {duration:.1f} 分鐘")
+            print(f"[{ts}] {plate} 抵達 {exit_stop}，共 {duration:.1f} 分鐘")
             save_log(today, name, plate,
                      board_dt.strftime("%H:%M:%S"),
                      now_local.strftime("%H:%M:%S"),
                      duration)
+            sess_status["completed"].append({
+                "plate":       plate,
+                "board_time":  board_dt.strftime("%H:%M:%S"),
+                "exit_time":   now_local.strftime("%H:%M:%S"),
+                "duration_min": round(duration, 1)
+            })
+            current_stop.pop(plate, None)
+
+        # 更新各車目前所在站
+        for bus in near:
+            plate = bus.get("PlateNumb", "")
+            if plate in active:
+                stop = bus.get("StopName", {}).get("Zh_tw", "")
+                seq  = bus.get("StopSequence", 0)
+                if seq >= current_stop.get(plate, {}).get("seq", 0):
+                    current_stop[plate] = {"stop": stop, "seq": seq}
+
+        # 寫 status.json
+        sess_status["active"] = [
+            {"plate":        p,
+             "board_time":   active[p].strftime("%H:%M:%S"),
+             "current_stop": current_stop.get(p, {}).get("stop", ""),
+             "elapsed_sec":  int((now_local - active[p]).total_seconds())}
+            for p in active
+        ]
+        write_status(day_status)
 
         # 狀態列
         if active:
-            status = ", ".join(
-                f"{p}({(now_local - t).seconds // 60}分)" for p, t in active.items()
-            )
-            print(f"[{ts}] 🔵 追蹤中：{status}", end="\r")
+            status = ", ".join(f"{p}({(now_local-t).seconds//60}分)" for p,t in active.items())
+            print(f"[{ts}] 追蹤中：{status}", end="\r")
         else:
             est, next_plate = get_next_bus_eta(cfg, direction, board_stop)
             if est is not None and est >= 0:
                 arrive_at = now_local + datetime.timedelta(seconds=est)
                 extra = ""
                 if "walk_minutes" in sess:
-                    dep = now_local + datetime.timedelta(
-                        seconds=est - sess["walk_minutes"] * 60)
-                    extra = f"  → 建議 {dep.strftime('%H:%M')} 出門"
-                print(
-                    f"[{ts}] 下一班 {next_plate}：{est // 60} 分後到站"
-                    f"（{arrive_at.strftime('%H:%M')}）{extra}",
-                    end="\r"
-                )
+                    dep = now_local + datetime.timedelta(seconds=est - sess["walk_minutes"]*60)
+                    extra = f"  -> 建議 {dep.strftime('%H:%M')} 出門"
+                print(f"[{ts}] 下一班 {next_plate}：{est//60} 分後到站({arrive_at.strftime('%H:%M')}){extra}", end="\r")
                 if est > 300:
                     sleep_sec = max(est - 180, 30)
-                    print(f"\n  💤 休眠 {sleep_sec // 60} 分鐘…")
+                    print(f"\n  休眠 {sleep_sec//60} 分鐘…")
                     time.sleep(sleep_sec)
                     continue
 
         time.sleep(cfg["poll_interval"])
 
-    # 班距統計
     if len(board_times) >= 2:
-        intervals = [(b - a).total_seconds() / 60
-                     for a, b in zip(board_times, board_times[1:])]
-        avg_gap = sum(intervals) / len(intervals)
-        print(f"  🕐 班距：共 {len(board_times)} 班，平均 {avg_gap:.0f} 分鐘"
-              f"（最短 {min(intervals):.0f} 分 / 最長 {max(intervals):.0f} 分）")
+        intervals = [(b-a).total_seconds()/60 for a,b in zip(board_times, board_times[1:])]
+        avg_gap = sum(intervals)/len(intervals)
+        print(f"  班距：共 {len(board_times)} 班，平均 {avg_gap:.0f} 分（最短 {min(intervals):.0f} / 最長 {max(intervals):.0f}）")
     elif len(board_times) == 1:
         print(f"  本次追蹤到 1 班公車。")
     else:
         print(f"  本次時段內未偵測到公車。")
 
-
-# ── 主程式 ───────────────────────────────────────────────────
 
 def main():
     if "--list-stops" in sys.argv:
@@ -285,42 +288,54 @@ def main():
     cfg = load_config()
 
     if cfg["client_id"] in ("YOUR_TDX_CLIENT_ID", "使用 GitHub Secrets"):
-        print("[錯誤] 請設定 TDX 金鑰（config.json 或 GitHub Secrets）")
+        print("[錯誤] 請設定 TDX 金鑰")
         sys.exit(1)
 
     show_stats(cfg)
     today = datetime.date.today().strftime("%Y-%m-%d")
 
+    day_status = {
+        "updated_at": "",
+        "date":       today,
+        "sessions": {
+            sess["name"]: {
+                "board_stop": sess["board_stop"],
+                "exit_stop":  sess["exit_stop"],
+                "active":     [],
+                "completed":  []
+            }
+            for sess in cfg["sessions"]
+        }
+    }
+    write_status(day_status)
+
     now_taiwan = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
     current_h  = now_taiwan.hour
 
     if IS_CLOUD:
-        sessions_to_run = [
-            s for s in cfg["sessions"]
-            if s["start_hour"] - 1 <= current_h < s["end_hour"]
-        ]
+        sessions_to_run = [s for s in cfg["sessions"]
+                           if s["start_hour"] - 1 <= current_h < s["end_hour"]]
         if not sessions_to_run:
             print(f"[{now_taiwan.strftime('%H:%M')} 台灣時間] 不在任何追蹤時段，結束。")
             return
     else:
         sessions_to_run = cfg["sessions"]
 
-    print(f"🚌  {cfg['route']}路  共 {len(sessions_to_run)} 個時段\n")
+    print(f"813路  共 {len(sessions_to_run)} 個時段\n")
 
     try:
         for sess in sessions_to_run:
             if not IS_CLOUD:
                 if datetime.datetime.now().hour >= sess["end_hour"]:
-                    print(f"  【{sess['name']}】已過時段，略過。")
+                    print(f"  [{sess['name']}] 已過時段，略過。")
                     continue
                 while datetime.datetime.now().hour < sess["start_hour"]:
                     now = datetime.datetime.now()
                     remain = (sess["start_hour"] - now.hour) * 60 - now.minute
-                    print(f"  ⏳ 距【{sess['name']}】開始還有 {remain} 分鐘…", end="\r")
+                    print(f"  距 [{sess['name']}] 開始還有 {remain} 分鐘…", end="\r")
                     time.sleep(30)
-            run_session(cfg, sess, today)
+            run_session(cfg, sess, today, day_status)
             show_stats(cfg)
-
     except KeyboardInterrupt:
         print("\n\n已中止。")
         show_stats(cfg)

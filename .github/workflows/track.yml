@@ -26,16 +26,27 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run bus tracker
+      - name: Run tracker + live commits
         env:
           TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
           TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
-        run: python tracker.py
-
-      - name: Commit results
         run: |
           git config user.name "Bus Tracker Bot"
           git config user.email "bot@noreply.github.com"
-          git add travel_log.csv
-          git diff --staged --quiet || git commit -m "bus: $(date +'%Y-%m-%d') 追蹤結果"
+
+          # 每 5 分鐘把 status.json 推上去（讓網頁能看到即時狀態）
+          (while true; do
+            sleep 300
+            git add status.json travel_log.csv 2>/dev/null
+            git diff --staged --quiet || (git commit -m "live: $(date +'%H:%M')" && git push)
+          done) &
+          LOOP=$!
+
+          python tracker.py
+
+          kill $LOOP 2>/dev/null || true
+
+          # 最終結果 commit
+          git add status.json travel_log.csv
+          git diff --staged --quiet || git commit -m "done: $(date +'%Y-%m-%d %H:%M')"
           git push

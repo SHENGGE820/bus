@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>813路 公車動態</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2f5;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    h1 { text-align: center; font-size: 22px; color: #1a1a2e; margin-bottom: 4px; }
+    .subtitle { text-align: center; font-size: 13px; color: #888; margin-bottom: 20px; }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .card-title { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+    .card-route { font-size: 12px; color: #999; }
+
+    .section-label {
+      font-size: 11px; font-weight: 700; color: #bbb;
+      letter-spacing: 1px; text-transform: uppercase;
+      margin: 14px 0 8px;
+    }
+
+    /* 進行中 */
+    .bus-active {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      background: #f0f7ff;
+      border: 1px solid #d0e8ff;
+    }
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #2196F3; flex-shrink: 0;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.35; transform: scale(0.75); }
+    }
+    .plate { font-size: 15px; font-weight: 700; color: #1a1a2e; min-width: 82px; }
+    .timer {
+      font-size: 21px; font-weight: 600; color: #2196F3;
+      min-width: 58px; font-variant-numeric: tabular-nums;
+    }
+    .cur-stop { font-size: 13px; color: #555; flex: 1; }
+
+    /* 已完成 */
+    .bus-done {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 14px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      background: #f9f9f9;
+    }
+    .bus-done .plate { color: #555; }
+    .trip-times { font-size: 13px; color: #555; flex: 1; }
+    .duration { font-size: 14px; font-weight: 700; color: #4CAF50; flex-shrink: 0; }
+
+    .empty { color: #ccc; font-size: 13px; padding: 8px 0; text-align: center; }
+    .footer { text-align: center; font-size: 11px; color: #ccc; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>🚌 813路 公車動態</h1>
+  <p class="subtitle" id="updated">載入中…</p>
+  <div id="content"></div>
+  <p class="footer">每 60 秒自動刷新</p>
+
+  <script>
+    const RAW = "https://raw.githubusercontent.com/SHENGGE820/bus/main/status.json";
+    let data = null;
+
+    function toMs(timeStr, dateStr) {
+      return new Date(dateStr + "T" + timeStr).getTime();
+    }
+
+    function fmtElapsed(ms) {
+      const sec = Math.max(0, Math.floor(ms / 1000));
+      const m   = Math.floor(sec / 60);
+      const s   = sec % 60;
+      return m + ":" + String(s).padStart(2, "0");
+    }
+
+    async function fetchData() {
+      try {
+        const r = await fetch(RAW + "?_=" + Date.now());
+        data = await r.json();
+        render();
+      } catch (e) {
+        document.getElementById("updated").textContent = "⚠ 無法載入資料（" + e.message + "）";
+      }
+    }
+
+    function render() {
+      if (!data) return;
+      document.getElementById("updated").textContent = "更新：" + data.updated_at;
+
+      document.getElementById("content").innerHTML =
+        Object.entries(data.sessions).map(([name, sess]) => {
+
+          const activeHtml = sess.active.length
+            ? sess.active.map(b => `
+                <div class="bus-active">
+                  <div class="dot"></div>
+                  <div class="plate">${b.plate}</div>
+                  <div class="timer" data-board="${b.board_time}" data-date="${data.date}">
+                    ${fmtElapsed(Date.now() - toMs(b.board_time, data.date))}
+                  </div>
+                  <div class="cur-stop">📍 ${b.current_stop || "追蹤中…"}</div>
+                </div>`).join("")
+            : `<div class="empty">目前無進行中班次</div>`;
+
+          const doneHtml = sess.completed.length
+            ? [...sess.completed].reverse().map(b => `
+                <div class="bus-done">
+                  <div class="plate">${b.plate}</div>
+                  <div class="trip-times">${b.board_time} → ${b.exit_time}</div>
+                  <div class="duration">${b.duration_min} 分</div>
+                </div>`).join("")
+            : `<div class="empty">今日尚無完成記錄</div>`;
+
+          return `
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">${name}</div>
+                <div class="card-route">${sess.board_stop} → ${sess.exit_stop}</div>
+              </div>
+              <div class="section-label">進行中</div>
+              ${activeHtml}
+              <div class="section-label">今日完成</div>
+              ${doneHtml}
+            </div>`;
+        }).join("");
+    }
+
+    // 每秒更新計時器
+    setInterval(() => {
+      if (!data) return;
+      document.querySelectorAll("[data-board]").forEach(el => {
+        el.textContent = fmtElapsed(Date.now() - toMs(el.dataset.board, el.dataset.date));
+      });
+    }, 1000);
+
+    fetchData();
+    setInterval(fetchData, 60000);
+  </script>
+</body>
+</html>
