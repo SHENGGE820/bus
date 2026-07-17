@@ -215,6 +215,7 @@ STATUS    = {
     "current_leg": -1,
     "legs": [],
     "height_cm": 170.0,
+    "cadence_spm": 110.0,
     "started_at": None,
     "eta_str": "--:--",
     "updated_at": "",
@@ -236,11 +237,12 @@ def eta_from_now(remaining_min):
     return t.strftime("%H:%M")
 
 
-def apply_height_to_walk_legs(height_cm):
-    """以 170 cm 為原始步行時間基準，依步幅近似比例調整。"""
-    factor = 170.0 / height_cm
+def apply_walking_profile(height_cm, cadence_spm):
+    """依步長（身高 × 0.414）及步頻調整，保留各路段原始路況耗時。"""
+    factor = (170.0 * 110.0) / (height_cm * cadence_spm)
     with _lock:
         STATUS["height_cm"] = height_cm
+        STATUS["cadence_spm"] = cadence_spm
         for leg in STATUS["legs"]:
             if leg["type"] == "walk":
                 leg["est_min"] = round(leg["base_est_min"] * factor, 1)
@@ -573,11 +575,14 @@ def settings():
     payload = request.get_json(silent=True) or {}
     try:
         height_cm = float(payload.get("height_cm"))
+        cadence_spm = float(payload.get("cadence_spm", STATUS["cadence_spm"]))
     except (TypeError, ValueError):
-        return jsonify({"ok": False, "msg": "身高必須是數字"}), 400
+        return jsonify({"ok": False, "msg": "身高與步頻必須是數字"}), 400
     if not 120 <= height_cm <= 220:
         return jsonify({"ok": False, "msg": "身高請輸入 120–220 公分"}), 400
-    apply_height_to_walk_legs(height_cm)
+    if not 60 <= cadence_spm <= 160:
+        return jsonify({"ok": False, "msg": "步頻請輸入 60–160 步／分鐘"}), 400
+    apply_walking_profile(height_cm, cadence_spm)
     with _lock:
         running = STATUS["running"]
         cur = STATUS["current_leg"]
@@ -596,7 +601,10 @@ def settings():
     return jsonify({
         "ok": True,
         "height_cm": STATUS["height_cm"],
-        "walk_factor": round(170.0 / height_cm, 3),
+        "cadence_spm": STATUS["cadence_spm"],
+        "step_length_m": round(height_cm * 0.414 / 100, 3),
+        "speed_mpm": round(height_cm * 0.414 / 100 * cadence_spm, 1),
+        "walk_factor": round((170.0 * 110.0) / (height_cm * cadence_spm), 3),
     })
 
 
