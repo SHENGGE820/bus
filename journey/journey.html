@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>通勤模擬器</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
@@ -114,6 +116,45 @@
     .dots span:nth-child(2){animation-delay:.2s}
     .dots span:nth-child(3){animation-delay:.4s}
     .updated { text-align:center; font-size:11px; color:#2a2a3a; margin-top:24px; }
+
+    /* ═══ MAP ═══ */
+    #map-wrap {
+      width:100%; height:260px; border-radius:16px; overflow:hidden;
+      margin-bottom:14px; border:1px solid #1e2030; position:relative;
+    }
+    #map { width:100%; height:100%; background:#0b0d13; }
+    /* Hide Leaflet attribution to save mobile space */
+    .leaflet-control-attribution { display:none; }
+    .leaflet-control-zoom { display:none; }
+    /* Character marker */
+    .char-icon {
+      font-size:26px; line-height:1;
+      filter:drop-shadow(0 2px 6px rgba(0,0,0,.9));
+      animation:char-float .6s ease-in-out infinite alternate;
+    }
+    @keyframes char-float {
+      from { transform:translateY(0); }
+      to   { transform:translateY(-5px); }
+    }
+    .char-icon.waiting {
+      animation:char-pulse 1s ease-in-out infinite;
+    }
+    @keyframes char-pulse {
+      0%,100% { transform:scale(1); }
+      50%      { transform:scale(1.25); }
+    }
+    .char-icon.on_board {
+      animation:char-ride .35s ease-in-out infinite alternate;
+    }
+    @keyframes char-ride {
+      from { transform:rotate(-6deg) translateY(-2px); }
+      to   { transform:rotate(6deg)  translateY(2px);  }
+    }
+    /* Completed polyline pulse */
+    .map-no-data {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      color:#333; font-size:12px; pointer-events:none; z-index:500;
+    }
   </style>
 </head>
 <body>
@@ -127,6 +168,12 @@
 <button class="btn btn-depart" id="btn-depart" onclick="addRipple(event,this);depart()">🚀 出發！</button>
 <button class="btn btn-board btn-hidden" id="btn-board" onclick="addRipple(event,this);board()">✅ 我上車了！</button>
 <button class="btn btn-reset" id="btn-reset" onclick="reset()">↺ 重設行程</button>
+
+<!-- Map -->
+<div id="map-wrap">
+  <div id="map"></div>
+  <div class="map-no-data" id="map-hint">地圖載入中（約 5 秒）…</div>
+</div>
 
 <div class="timeline" id="timeline"></div>
 <div class="updated" id="updated"></div>
@@ -285,6 +332,168 @@ setInterval(() => {
 
 fetchStatus();
 setInterval(fetchStatus, 5000);
-</script>
+
+// ════════════════════════════════
+// LEAFLET MAP
+// ════════════════════════════════
+let leafMap   = null;
+let routeLine = null;
+let doneLines = [];   // completed legs (green)
+let charMarker = null;
+let mapReady  = false;
+let mapData   = null;
+let geoWatchId = null;
+// Smooth movement
+let curLat = null, curLng = null;
+let tgtLat = null, tgtLng = null;
+
+async function fetchMapData() {
+  try {
+    const r = await fetch("/map-data");
+    mapData = await r.json();
+    if (!mapReady && mapData.waypoints && mapData.waypoints.length >= 2) {
+      initLeafMap();
+    }
+    if (mapReady) updateCharMarker();
+  } catch(e) {}
+}
+
+function initLeafMap() {
+  if (mapReady) return;
+  mapReady = true;
+
+  document.getElementById("map-hint").style.display = "none";
+
+  leafMap = L.map("map", {zoomControl:false, attributionControl:false});
+
+  // CartoDB Dark Matter tiles (no API key)
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+              {maxZoom:19}).addTo(leafMap);
+
+  const pts = mapData.waypoints.map(w => [w.lat, w.lng]);
+
+  // Planned route — dashed blue
+  routeLine = L.polyline(pts, {color:"#1565c0", weight:3, opacity:.6, dashArray:"8,6"}).addTo(leafMap);
+
+  // Waypoint dots
+  mapData.waypoints.forEach((w, i) => {
+    const isEnd = i===0 || i===mapData.waypoints.length-1;
+    L.circleMarker([w.lat, w.lng], {
+      radius: isEnd?8:5, color:"#fff", weight:2,
+      fillColor: isEnd?"#FF9800":"#1565c0", fillOpacity:1
+    }).bindTooltip(w.name, {direction:"top", className:"map-tip"}).addTo(leafMap);
+  });
+
+  leafMap.fitBounds(routeLine.getBounds(), {padding:[24,24]});
+
+  // Touch: zoom by double-tap on map wrap
+  document.getElementById("map-wrap").addEventListener("dblclick", () => {
+    leafMap.zoomIn();
+  });
+
+  startGeoWatch();
+}
+
+function getCharIcon(type, status) {
+  const e = status==="walking"?"🚶":type==="metro"?"🚇":type==="bus"?"🚌":"📍";
+  return L.divIcon({
+    html: `<div class="char-icon ${status}">${e}</div>`,
+    className: "", iconSize:[36,36], iconAnchor:[18,30]
+  });
+}
+
+function moveTo(lat, lng) {
+  tgtLat = lat; tgtLng = lng;
+  if (curLat === null) { curLat = lat; curLng = lng; }
+}
+
+function updateCharMarker() {
+  if (!data || !leafMap || !mapData) return;
+  const cur = data.current_leg;
+  if (!data.running || cur < 0) return;
+
+  const leg = data.legs[cur];
+  const s   = leg.status;
+
+  // Update icon
+  if (charMarker) charMarker.setIcon(getCharIcon(leg.type, s));
+
+  if (s === "on_board" && leg.type === "bus" && leg.lat && leg.lng) {
+    // Real GPS from TDX
+    moveTo(leg.lat, leg.lng);
+
+  } else if (s === "on_board" && leg.type === "metro") {
+    // Interpolate between from/to station waypoints
+    const fromW = mapData.waypoints.find(w => w.id === leg.from_id);
+    const toW   = mapData.waypoints.find(w => w.id === leg.to_id);
+    if (fromW && toW) {
+      const prog = Math.min(1, calcProgress(leg) / 100);
+      moveTo(
+        fromW.lat + (toW.lat - fromW.lat) * prog,
+        fromW.lng + (toW.lng - fromW.lng) * prog
+      );
+    }
+
+  } else if (s === "waiting") {
+    // At boarding station/stop
+    const key = leg.type === "bus" ? `stop:${leg.from_stop}` : leg.from_id;
+    const w = mapData.waypoints.find(w => w.id === key);
+    if (w) moveTo(w.lat, w.lng);
+  }
+  // Walking: handled by geolocation, falls back to time-interpolation below
+}
+
+// Smooth lerp animation (60fps)
+setInterval(() => {
+  if (!leafMap || tgtLat === null) return;
+  if (curLat === null) { curLat = tgtLat; curLng = tgtLng; }
+  const k = 0.07;
+  curLat += (tgtLat - curLat) * k;
+  curLng += (tgtLng - curLng) * k;
+  if (!charMarker) {
+    charMarker = L.marker([curLat, curLng], {
+      icon: getCharIcon("walk", "walking"),
+      zIndexOffset: 1000
+    }).addTo(leafMap);
+  } else {
+    charMarker.setLatLng([curLat, curLng]);
+  }
+  // Pan map to follow character (lazy pan — only when far from center)
+  const mapCenter = leafMap.getCenter();
+  const dist = leafMap.distance([curLat,curLng],[mapCenter.lat,mapCenter.lng]);
+  if (dist > 400) leafMap.panTo([curLat, curLng], {animate:true, duration:1.5});
+}, 100);
+
+// Walk fallback: interpolate along route when no GPS
+setInterval(() => {
+  if (!data || !data.running || !mapData) return;
+  const cur = data.current_leg;
+  if (cur < 0) return;
+  const leg = data.legs[cur];
+  if (leg.status !== "walking" || tgtLat !== null) return;  // already have pos
+  // Find start/end waypoints for this walk leg
+  const startW = mapData.waypoints[0];  // rough fallback: use first waypoint
+  if (startW) moveTo(startW.lat, startW.lng);
+}, 2000);
+
+function startGeoWatch() {
+  if (!navigator.geolocation || geoWatchId) return;
+  geoWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      if (!data || !data.running) return;
+      const cur = data.current_leg;
+      if (cur < 0) return;
+      const leg = data.legs[cur];
+      if (leg.status === "walking") {
+        moveTo(pos.coords.latitude, pos.coords.longitude);
+      }
+    },
+    () => {},  // ignore errors
+    {enableHighAccuracy:true, maximumAge:5000, timeout:10000}
+  );
+}
+
+fetchMapData();
+setInterval(fetchMapData, 10000);  // re-fetch every 10s for bus GPS
 </body>
 </html>

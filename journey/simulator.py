@@ -122,6 +122,84 @@ def get_bus_near_stop(city, route, direction, cfg):
     )
 
 
+# ── 地圖座標 ─────────────────────────────────────────────────
+_waypoints = []   # [{id, lat, lng, name}, ...]  由背景任務填入
+
+
+def get_bus_live_pos(city, route, direction, plate, cfg):
+    """查公車即時 GPS（PlateNumb 精確比對）"""
+    try:
+        d = tdx(f"v2/Bus/RealTimeByRoute/City/{city}/{route}", cfg,
+                {"$filter": f"Direction eq {direction}"})
+        for b in d:
+            if b.get("PlateNumb", "") == plate:
+                pos = b.get("BusPosition", {})
+                lat = pos.get("PositionLat")
+                lng = pos.get("PositionLon")
+                if lat and lng:
+                    return lat, lng
+    except:
+        pass
+    return None, None
+
+
+def _fetch_waypoints_task():
+    """背景任務：啟動時從 TDX 取得路線各站/站牌座標"""
+    global _waypoints
+    time.sleep(4)   # 等 token 就緒
+    coords = {}
+
+    try:  # 機場捷運站
+        for s in tdx("v2/Rail/Metro/Station/TYMC", CFG):
+            sid = s.get("StationID", "")
+            p   = s.get("StationPosition", {})
+            name = s.get("StationName", {}).get("Zh_tw", sid)
+            coords[sid] = (p.get("PositionLat"), p.get("PositionLon"), name)
+    except Exception as e:
+        print(f"[map] TYMC 失敗: {e}")
+
+    try:  # 環狀線
+        for s in tdx("v2/Rail/Metro/Station/TRTC", CFG,
+                     {"$filter": "LineID eq 'Y'"}):
+            sid = s.get("StationID", "")
+            p   = s.get("StationPosition", {})
+            name = s.get("StationName", {}).get("Zh_tw", sid)
+            coords[sid] = (p.get("PositionLat"), p.get("PositionLon"), name)
+    except Exception as e:
+        print(f"[map] TRTC 失敗: {e}")
+
+    try:  # 262 公車站牌
+        d = tdx("v2/Bus/StopOfRoute/City/NewTaipei/262", CFG,
+                {"$filter": "Direction eq 0"})
+        stops = d[0].get("Stops", []) if d else []
+        for stop in stops:
+            name = stop.get("StopName", {}).get("Zh_tw", "")
+            p    = stop.get("StopPosition", {})
+            if name:
+                coords[f"stop:{name}"] = (p.get("PositionLat"), p.get("PositionLon"), name)
+    except Exception as e:
+        print(f"[map] Bus 262 站牌失敗: {e}")
+
+    # start / end 從 journey.json 讀
+    jdata = json.load(open(JOURNEY_FILE, encoding="utf-8"))
+    sc = jdata.get("start_coord", [25.044, 121.422])
+    ec = jdata.get("end_coord",   [24.988, 121.483])
+    coords["__start"] = (sc[0], sc[1], "出發點")
+    coords["__end"]   = (ec[0], ec[1], "目的地")
+
+    order = ["__start", "A4", "A3", "Y13",
+             "stop:捷運橋和站", "stop:臺灣新北地方法院(金城)", "__end"]
+    wpts = [{"id": k, "lat": coords[k][0], "lng": coords[k][1], "name": coords[k][2]}
+            for k in order if k in coords and coords[k][0]]
+
+    with _lock:
+        _waypoints = wpts
+
+    print(f"[map] {len(wpts)} 個路線點：")
+    for w in wpts:
+        print(f"  {w['id']:42} {w['lat']:.5f}, {w['lng']:.5f}  {w['name']}")
+
+
 # ── 狀態機 ───────────────────────────────────────────────────
 
 JOURNEY   = None   # 從 journey.json 讀入
@@ -292,10 +370,19 @@ def update_bus_waiting(leg):
 
 
 def update_bus_on_board(leg):
-    """在車上：追蹤公車到目的站"""
+    """在車上：追蹤公車到目的站，並取得即時 GPS 位置"""
+    plate = leg.get("vehicle_id", "")
+
+    # ── GPS 即時位置 ──────────────────────────────────────────
+    if plate:
+        lat, lng = get_bus_live_pos(
+            leg["city"], leg["route"], leg["direction"], plate, CFG)
+        if lat:
+            leg["lat"] = lat
+            leg["lng"] = lng
+
     try:
         near = get_bus_near_stop(leg["city"], leg["route"], leg["direction"], CFG)
-        plate = leg.get("vehicle_id", "")
 
         # 更新目前站
         for bus in near:
@@ -419,7 +506,19 @@ def reset():
         for leg in STATUS["legs"]:
             leg["status"] = "pending"
             leg["info"]   = ""
+            leg["lat"]    = None
+            leg["lng"]    = None
     return jsonify({"ok": True})
+
+
+@app.route("/map-data")
+def map_data_endpoint():
+    with _lock:
+        cur = STATUS["current_leg"]
+        return jsonify({
+            "waypoints": _waypoints,
+            "current_leg": cur,
+        })
 
 
 # ── 初始化 ───────────────────────────────────────────────────
@@ -468,7 +567,9 @@ def init():
                 "current_stop": "",
                 "started_at":   "",
                 "ended_at":     "",
-                "boarded_at":   ""
+                "boarded_at":   "",
+                "lat":          None,
+                "lng":          None
             }
             for leg in JOURNEY["legs"]
         ]
@@ -480,6 +581,10 @@ def main():
     # 啟動背景輪詢
     t = threading.Thread(target=poll_loop, daemon=True)
     t.start()
+
+    # 背景取路線座標（地圖用）
+    wt = threading.Thread(target=_fetch_waypoints_task, daemon=True)
+    wt.start()
 
     ip = get_local_ip()
     print(f"\n🚌  通勤模擬器啟動")
