@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import socket
+import math
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -31,6 +32,51 @@ _tdx_cache = {}
 _tdx_request_lock = threading.Lock()
 _tdx_cooldown_until = 0.0
 _tdx_last_request_at = 0.0
+
+# 新北捷運官方 Y20 發車時刻（2026-07-17 下載版本）。TDX 已無環狀線 Y 即時資料。
+Y20_WEEKDAY = {
+    6: [0, 4, 13, 21, 28, 36, 44, 49, 54],
+    7: [0, 5, 10, 15, 20, 25, 29, 34, 39, 43, 48, 53, 58],
+    8: [3, 9, 14, 18, 23, 28, 33, 37, 42, 45, 52, 57],
+    9: [1, 6, 11, 17, 22, 29, 36, 44, 51, 59],
+    10: [8, 16, 21, 29, 36, 44, 51, 59],
+    11: [6, 14, 21, 29, 36, 44, 51, 59],
+    12: [6, 14, 21, 29, 36, 44, 51, 59],
+    13: [6, 14, 21, 29, 36, 44, 51, 59],
+    14: [6, 14, 21, 29, 36, 44, 51, 59],
+    15: [6, 14, 21, 29, 36, 44, 51, 59],
+    16: [7, 14, 22, 29, 36, 43, 51, 56],
+    17: [1, 6, 11, 16, 20, 25, 30, 34, 39, 44, 49, 53, 58],
+    18: [5, 9, 14, 19, 24, 28, 33, 37, 42, 47, 52, 57],
+    19: [1, 8, 13, 17, 22, 27, 31, 36, 41, 45, 52],
+    20: [0, 9, 19, 29, 39, 49, 59],
+    21: [9, 19, 29, 39, 49, 59],
+    22: [9, 19, 27, 36, 46, 56],
+    23: [7, 15, 23, 31, 39, 48],
+    24: [0],
+}
+Y20_WEEKEND = {
+    6: [2, 11, 19, 27, 34, 43, 51], 7: [0, 8, 15, 22, 31, 41, 52],
+    8: [2, 12, 22, 32, 43, 52], 9: [2, 12, 22, 32, 41, 50, 58],
+    10: [6, 11, 18, 26, 33, 41, 48, 56],
+    11: [3, 11, 18, 26, 33, 41, 48, 56],
+    12: [3, 11, 18, 26, 33, 41, 48, 56],
+    13: [3, 11, 18, 26, 33, 41, 48, 56],
+    14: [3, 11, 18, 26, 33, 41, 48, 56],
+    15: [3, 11, 18, 26, 33, 41, 48, 56],
+    16: [3, 11, 18, 26, 33, 41, 48, 56],
+    17: [3, 11, 18, 26, 33, 41, 48, 56],
+    18: [3, 13, 22, 32, 42, 52], 19: [2, 12, 22, 32, 42, 52],
+    20: [2, 12, 22, 32, 42, 52], 21: [2, 12, 22, 32, 42, 52],
+    22: [2, 12, 22, 32, 42, 52], 23: [2, 12, 21, 30, 38, 46, 58],
+    24: [10, 23, 34],
+}
+YELLOW_STATIONS = [
+    ("Y20", "新北產業園區", 0), ("Y19", "幸福", 2),
+    ("Y18", "頭前庄", 4), ("Y17", "新埔民生", 6),
+    ("Y16", "板橋", 9), ("Y15", "板新", 12),
+    ("Y14", "中原", 14), ("Y13", "橋和", 16),
+]
 
 
 class TDXRateLimitError(RuntimeError):
@@ -153,6 +199,21 @@ def get_bus_eta(city, route, stop_name, direction, cfg):
     return None, None
 
 
+def get_bus_vehicle_eta(city, route, stop_name, direction, plate, cfg):
+    """取得指定車牌到指定站的 ETA 秒數。"""
+    filters = [f"StopName/Zh_tw eq '{stop_name}'", f"Direction eq {direction}"]
+    if plate:
+        filters.append(f"PlateNumb eq '{plate}'")
+    data = tdx(
+        f"v2/Bus/EstimatedTimeOfArrival/City/{city}/{route}", cfg,
+        {"$filter": " and ".join(filters), "$orderby": "EstimateTime asc"}
+    )
+    estimates = [item.get("EstimateTime") for item in data
+                 if isinstance(item.get("EstimateTime"), int)
+                 and (not plate or item.get("PlateNumb") == plate)]
+    return min(estimates) if estimates else None
+
+
 def get_bus_near_stop(city, route, direction, cfg):
     """取得公車各站即時位置"""
     return tdx(
@@ -197,16 +258,6 @@ def _fetch_waypoints_task():
             coords[sid] = (p.get("PositionLat"), p.get("PositionLon"), name)
     except Exception as e:
         print(f"[map] TYMC 失敗: {e}")
-
-    try:  # 環狀線
-        for s in tdx("v2/Rail/Metro/Station/TRTC", CFG,
-                     {"$filter": "LineID eq 'Y'"}):
-            sid = s.get("StationID", "")
-            p   = s.get("StationPosition", {})
-            name = s.get("StationName", {}).get("Zh_tw", sid)
-            coords[sid] = (p.get("PositionLat"), p.get("PositionLon"), name)
-    except Exception as e:
-        print(f"[map] TRTC 失敗: {e}")
 
     try:  # 262 公車站牌
         d = tdx("v2/Bus/StopOfRoute/City/NewTaipei/262", CFG,
@@ -261,6 +312,7 @@ STATUS    = {
     "error": ""
 }
 _lock = threading.RLock()
+_poll_wakeup = threading.Event()
 
 
 def now_str():
@@ -274,6 +326,21 @@ def ts():
 def eta_from_now(remaining_min):
     t = datetime.datetime.now() + datetime.timedelta(minutes=remaining_min)
     return t.strftime("%H:%M")
+
+
+def next_y20_departure(now=None):
+    now = now or ts()
+    candidates = []
+    for day_offset in (0, 1):
+        service_day = (now + datetime.timedelta(days=day_offset)).date()
+        schedule = Y20_WEEKEND if service_day.weekday() >= 5 else Y20_WEEKDAY
+        midnight = datetime.datetime.combine(service_day, datetime.time())
+        for hour, minutes in schedule.items():
+            for minute in minutes:
+                departure = midnight + datetime.timedelta(hours=hour, minutes=minute)
+                if departure >= now:
+                    candidates.append(departure)
+    return min(candidates) if candidates else None
 
 
 def format_elapsed(seconds):
@@ -306,9 +373,13 @@ def recalculate_eta():
             if s == "completed":
                 continue
             elif s in ("walking", "waiting", "on_board"):
-                elapsed = (ts() - datetime.datetime.fromisoformat(
-                    leg.get("started_at", ts().isoformat()))).total_seconds() / 60
-                remain = max(0, leg["est_min"] - elapsed)
+                live_remain = leg.get("live_remaining_min")
+                if isinstance(live_remain, (int, float)):
+                    remain = max(0, live_remain)
+                else:
+                    elapsed = (ts() - datetime.datetime.fromisoformat(
+                        leg.get("started_at", ts().isoformat()))).total_seconds() / 60
+                    remain = max(0, leg["est_min"] - elapsed)
                 total_remain += remain
                 # add future legs
                 for j in range(i + 1, len(STATUS["legs"])):
@@ -344,6 +415,7 @@ def advance_to_next_leg():
             STATUS["elapsed_text"] = format_elapsed(elapsed)
             STATUS["eta_str"] = completed.strftime("%H:%M")
             STATUS["updated_at"] = now_str()
+            _poll_wakeup.set()
             return
         STATUS["current_leg"] = nxt
         leg = STATUS["legs"][nxt]
@@ -355,6 +427,10 @@ def advance_to_next_leg():
         leg["info"] = ""
         leg["vehicle_id"] = ""
         leg["current_stop"] = ""
+        leg["live_remaining_min"] = None
+        leg["tracking_source"] = ""
+        leg["scheduled_departure"] = ""
+        _poll_wakeup.set()
 
 
 def user_board():
@@ -384,6 +460,7 @@ def auto_board_leg(leg, vehicle_id=""):
         if vehicle_id:
             leg["vehicle_id"] = vehicle_id
         leg["info"] = "已偵測進站，自動上車"
+        _poll_wakeup.set()
         return True
 
 
@@ -392,6 +469,8 @@ def auto_board_leg(leg, vehicle_id=""):
 def update_walk_leg(leg):
     elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
     remain  = max(0, leg["est_min"] - elapsed)
+    leg["live_remaining_min"] = remain
+    leg["tracking_source"] = "身高估算"
     leg["info"] = f"剩餘約 {remain:.0f} 分鐘"
     if elapsed >= leg["est_min"]:
         advance_to_next_leg()
@@ -399,8 +478,70 @@ def update_walk_leg(leg):
 
 # ── 捷運腿更新 ───────────────────────────────────────────────
 
+def update_yellow_waiting(leg):
+    """環狀線目前無 TDX 即時資料，使用新北捷運官方 Y20 發車時刻。"""
+    now = ts()
+    departure_iso = leg.get("scheduled_departure", "")
+    departure = datetime.datetime.fromisoformat(departure_iso) if departure_iso else None
+    if departure is None:
+        departure = next_y20_departure(now)
+        leg["scheduled_departure"] = departure.isoformat() if departure else ""
+    if departure is None:
+        leg["info"] = "目前非營運時段，等待官方班次"
+        leg["live_remaining_min"] = leg["est_min"]
+        leg["tracking_source"] = "官方時刻"
+        return
+
+    wait_seconds = (departure - now).total_seconds()
+    wait_min = max(0, wait_seconds / 60)
+    leg["live_remaining_min"] = wait_min + leg["est_min"]
+    leg["tracking_source"] = "新北捷運官方時刻"
+    if wait_seconds <= 0:
+        if auto_board_leg(leg):
+            leg["started_at"] = departure.isoformat()
+            leg["boarded_at"] = departure.strftime("%H:%M:%S")
+            leg["info"] = "依官方時刻推定已發車"
+        return
+    if wait_seconds <= 60:
+        leg["info"] = f"下一班 {departure.strftime('%H:%M')} 發車・不到 1 分鐘"
+    else:
+        leg["info"] = (
+            f"下一班 {departure.strftime('%H:%M')} 發車・約 {math.ceil(wait_min)} 分鐘"
+        )
+
+
+def update_yellow_on_board(leg):
+    """按官方運行時間圖推算 Y20 至 Y13 的逐站位置與剩餘時間。"""
+    elapsed = max(0, (ts() - datetime.datetime.fromisoformat(
+        leg["started_at"])).total_seconds() / 60)
+    total = YELLOW_STATIONS[-1][2]
+    remain = max(0, total - elapsed)
+    current_idx = max(
+        i for i, (_, _, cumulative) in enumerate(YELLOW_STATIONS)
+        if cumulative <= min(elapsed, total)
+    )
+    station_id, station_name, _ = YELLOW_STATIONS[current_idx]
+    leg["current_stop"] = f"{station_id} {station_name}"
+    leg["live_remaining_min"] = remain
+    leg["tracking_source"] = "官方時刻推定"
+
+    if elapsed >= total:
+        leg["info"] = f"推定已抵達 {leg['to_name']}，自動下車"
+        advance_to_next_leg()
+        return
+
+    next_id, next_name, next_at = YELLOW_STATIONS[current_idx + 1]
+    to_next = max(0, next_at - elapsed)
+    leg["info"] = (
+        f"時刻推定 📍 {station_id} {station_name} → {next_id} {next_name}・"
+        f"約 {math.ceil(to_next)} 分到下一站・{math.ceil(remain)} 分到 {leg['to_name']}"
+    )
+
 def update_metro_waiting(leg):
     """等車中：顯示下一班列車（EstimateTime 為整數分鐘）"""
+    if leg.get("line_id") == "Y":
+        update_yellow_waiting(leg)
+        return
     try:
         est = get_metro_next(
             leg["system"], leg["from_id"],
@@ -410,10 +551,13 @@ def update_metro_waiting(leg):
         headsign = leg.get("headsign", "")
         if est is None:
             leg["info"] = "查詢中…"
+            leg["live_remaining_min"] = leg["est_min"]
         elif est == 0:
             auto_board_leg(leg)
         else:
             leg["info"] = f"下一班（往{headsign}）：{est} 分後到站"
+            leg["live_remaining_min"] = est + leg["est_min"]
+        leg["tracking_source"] = "TDX 即時"
     except Exception as e:
         leg["info"] = f"⚠ {e}"
 
@@ -424,8 +568,14 @@ def update_metro_on_board(leg):
     TDX 捷運 LiveBoard 沒有 TrainNo，因此用「方向 + 上車時間 +
     目的站到站事件」配對，並設最短行駛時間避免誤認前一班列車。
     """
+    if leg.get("line_id") == "Y":
+        update_yellow_on_board(leg)
+        return
+
     elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
     remain  = max(0, leg["est_min"] - elapsed)
+    leg["live_remaining_min"] = remain
+    leg["tracking_source"] = "TDX 即時＋官方站間時間"
     min_arrival_minutes = max(0.5, leg["est_min"] * 0.35)
 
     # 查目的站；EstimateTime == 0 代表相同方向列車已抵達目的站。
@@ -439,10 +589,10 @@ def update_metro_on_board(leg):
             leg["info"] = f"已抵達 {leg['to_name']}，自動下車"
             advance_to_next_leg()
             return
-        if est_dest is not None:
-            leg["info"] = f"行駛中　目的站 {leg['to_name']}：{est_dest} 分後有車抵達"
-        else:
-            leg["info"] = f"行駛中　約 {remain:.0f} 分鐘到 {leg['to_name']}"
+        if est_dest is not None and est_dest > 0 and elapsed >= min_arrival_minutes:
+            remain = min(remain, float(est_dest))
+            leg["live_remaining_min"] = remain
+        leg["info"] = f"行駛中・約 {math.ceil(remain)} 分到 {leg['to_name']}（TDX）"
     except Exception:
         leg["info"] = f"行駛中　約 {remain:.0f} 分鐘到 {leg['to_name']}"
 
@@ -460,8 +610,11 @@ def update_bus_waiting(leg):
         est, plate = get_bus_eta(
             leg["city"], leg["route"], leg["from_stop"], leg["direction"], CFG)
         if est is not None and est >= 0:
-            leg["info"] = f"下一班 {plate}：{est // 60} 分後到站"
+            eta_min = max(0, est / 60)
+            leg["info"] = f"下一班 {plate}・約 {math.ceil(eta_min)} 分鐘到站"
             leg["vehicle_id"] = plate
+            leg["live_remaining_min"] = eta_min + leg["est_min"]
+            leg["tracking_source"] = "TDX 即時"
         else:
             leg["info"] = "查詢中…"
     except Exception as e:
@@ -522,16 +675,30 @@ def update_bus_on_board(leg):
             return
 
         elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
-        remain  = max(0, leg["est_min"] - elapsed)
+        try:
+            eta_seconds = get_bus_vehicle_eta(
+                leg["city"], leg["route"], leg["to_stop"],
+                leg["direction"], plate, CFG
+            )
+        except Exception:
+            eta_seconds = None
+        remain = (eta_seconds / 60 if eta_seconds is not None
+                  else max(0, leg["est_min"] - elapsed))
+        leg["live_remaining_min"] = remain
+        leg["tracking_source"] = "TDX 車牌即時" if eta_seconds is not None else "預估備援"
         cur_stop = leg.get("current_stop", "")
-        leg["info"] = f"{'📍 ' + cur_stop if cur_stop else '行駛中'}　剩約 {remain:.0f} 分"
+        source = "即時" if eta_seconds is not None else "估算"
+        leg["info"] = (
+            f"{'📍 ' + cur_stop if cur_stop else '行駛中'}・"
+            f"約 {math.ceil(remain)} 分到 {leg['to_stop']}（{source}）"
+        )
 
         # TDX 若漏掉目的站事件，以預估時間 + 2 分鐘作為安全備援。
-        if elapsed >= leg["est_min"] + 2:
+        if eta_seconds is None and elapsed >= leg["est_min"] + 5:
             advance_to_next_leg()
     except Exception as e:
         elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
-        if elapsed >= leg["est_min"] + 2:
+        if elapsed >= leg["est_min"] + 5:
             advance_to_next_leg()
         else:
             leg["info"] = f"行駛中… 約 {max(0, leg['est_min'] - elapsed):.0f} 分"
@@ -551,7 +718,9 @@ def poll_loop():
                     leg = STATUS["legs"][cur_idx]
                     ltype  = leg["type"]
                     lstatus = leg["status"]
-                if lstatus in ("waiting", "on_board"):
+                if ltype == "walk" or (ltype == "metro" and leg.get("line_id") == "Y"):
+                    sleep_seconds = 5
+                elif lstatus in ("waiting", "on_board"):
                     sleep_seconds = 15
 
                 if ltype == "walk" and lstatus == "walking":
@@ -570,7 +739,8 @@ def poll_loop():
         except Exception as e:
             with _lock:
                 STATUS["error"] = str(e)
-        time.sleep(sleep_seconds)
+        _poll_wakeup.wait(sleep_seconds)
+        _poll_wakeup.clear()
 
 
 # ── Flask ────────────────────────────────────────────────────
@@ -624,6 +794,9 @@ def depart():
             leg["boarded_at"]   = ""
             leg["lat"]          = None
             leg["lng"]          = None
+            leg["live_remaining_min"] = None
+            leg["tracking_source"] = ""
+            leg["scheduled_departure"] = ""
     advance_to_next_leg()
     recalculate_eta()
     return jsonify({"ok": True})
@@ -695,6 +868,10 @@ def reset():
             leg["boarded_at"]   = ""
             leg["lat"]          = None
             leg["lng"]          = None
+            leg["live_remaining_min"] = None
+            leg["tracking_source"] = ""
+            leg["scheduled_departure"] = ""
+        _poll_wakeup.set()
     return jsonify({"ok": True})
 
 
@@ -753,6 +930,9 @@ def init():
                 "info":         "",
                 "vehicle_id":   "",
                 "current_stop": "",
+                "live_remaining_min": None,
+                "tracking_source": "",
+                "scheduled_departure": "",
                 "started_at":   "",
                 "ended_at":     "",
                 "boarded_at":   "",

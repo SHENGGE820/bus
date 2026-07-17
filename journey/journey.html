@@ -97,6 +97,8 @@
     .leg-info.waiting { color:#FFB74D; }
     .leg-info.on_board { color:#64b5f6; }
     .leg-info.completed { color:#66bb6a; }
+    .tracking-source { display:inline-block; margin-top:6px; padding:2px 7px; border-radius:99px; background:#192131; color:#78909c; font-size:10px; }
+    .tracking-source:empty { display:none; }
 
     .progress-track { height:3px; background:#1e2030; border-radius:2px; margin-top:9px; overflow:hidden; }
     .progress-bar { height:100%; border-radius:2px; transition:width .5s linear; }
@@ -408,6 +410,8 @@ function _updateTimelineDynamic() {
       const nextInfo = leg.info || loadingHTML();
       if (infoEl.innerHTML !== nextInfo) infoEl.innerHTML = nextInfo;
     }
+    const sourceEl = document.getElementById(`tracking-source-${i}`);
+    if (sourceEl) sourceEl.textContent = leg.tracking_source || "";
   });
 }
 
@@ -426,6 +430,7 @@ function _buildTimeline(firstBuild) {
       ? `<div class="progress-track"><div class="progress-bar ${s==="on_board"?"on_board":s}" style="width:${prog}%"></div></div>` : "";
     const times=[]; if(leg.boarded_at) times.push("上車 "+leg.boarded_at); if(leg.ended_at) times.push("到站 "+leg.ended_at);
     const timesH=times.length?`<div class="leg-times">${times.map(t=>`<span>${t}</span>`).join("")}</div>`:"";
+    const sourceH=`<div class="tracking-source" id="tracking-source-${i}">${leg.tracking_source||""}</div>`;
 
     const dotCls=s==="completed"?"dot done":s==="on_board"?"dot on-board":s==="waiting"?"dot waiting":s==="walking"?"dot walking":"dot";
     const lineCls=s==="completed"?"line done":(s==="walking"||s==="waiting"||s==="on_board")?"line active":"line";
@@ -440,7 +445,7 @@ function _buildTimeline(firstBuild) {
       <div class="leg-card status-${s}">
         <div class="leg-name ${nameClass}">${ICONS[leg.type]||"•"} ${leg.name}</div>
         <div class="leg-meta" id="leg-meta-${i}">${meta}</div>
-        ${anim}${info}${bar}${timesH}
+        ${anim}${info}${sourceH}${bar}${timesH}
       </div>
     </div>`;
   }).join("");
