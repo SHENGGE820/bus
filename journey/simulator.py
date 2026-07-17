@@ -27,6 +27,14 @@ TDX_BASE      = "https://tdx.transportdata.tw/api/basic"
 
 _token        = None
 _token_expiry = None
+_tdx_cache = {}
+_tdx_request_lock = threading.Lock()
+_tdx_cooldown_until = 0.0
+_tdx_last_request_at = 0.0
+
+
+class TDXRateLimitError(RuntimeError):
+    pass
 
 
 def load_config():
@@ -57,22 +65,48 @@ def get_token(cfg):
 
 
 def tdx(path, cfg, params=None):
+    global _tdx_cooldown_until, _tdx_last_request_at
     token = get_token(cfg)
     p = {"$format": "JSON"}
     if params:
         p.update(params)
+    cache_key = (path, json.dumps(p, sort_keys=True, ensure_ascii=False))
     url = f"{TDX_BASE}/{path}"
     headers = {"Authorization": "Bearer " + token}
-    r = requests.get(url, headers=headers, params=p, timeout=10)
-    if r.status_code == 429:
-        try:
-            retry_after = min(5.0, max(1.0, float(r.headers.get("Retry-After", "2"))))
-        except ValueError:
-            retry_after = 2.0
-        time.sleep(retry_after)
+
+    with _tdx_request_lock:
+        now = time.monotonic()
+        cached = _tdx_cache.get(cache_key)
+        if now < _tdx_cooldown_until:
+            if cached and now - cached[0] <= 120:
+                return cached[1]
+            wait = max(1, int(_tdx_cooldown_until - now + 0.999))
+            raise TDXRateLimitError(f"TDX 請求過多，約 {wait} 秒後自動重試")
+
+        # 避免多個端點在同一瞬間送出，降低再次觸發每秒流量限制的機率。
+        interval = now - _tdx_last_request_at
+        if interval < 0.5:
+            time.sleep(0.5 - interval)
         r = requests.get(url, headers=headers, params=p, timeout=10)
-    r.raise_for_status()
-    return r.json()
+        _tdx_last_request_at = time.monotonic()
+
+        if r.status_code == 429:
+            try:
+                retry_after = float(r.headers.get("Retry-After", "30"))
+            except (TypeError, ValueError):
+                retry_after = 30.0
+            retry_after = min(120.0, max(15.0, retry_after))
+            _tdx_cooldown_until = time.monotonic() + retry_after
+            if cached and time.monotonic() - cached[0] <= 120:
+                return cached[1]
+            raise TDXRateLimitError(
+                f"TDX 請求過多，約 {int(retry_after)} 秒後自動重試"
+            )
+
+        r.raise_for_status()
+        result = r.json()
+        _tdx_cache[cache_key] = (time.monotonic(), result)
+        return result
 
 
 # ── TDX 查詢 ─────────────────────────────────────────────────
