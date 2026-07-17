@@ -61,11 +61,16 @@ def tdx(path, cfg, params=None):
     p = {"$format": "JSON"}
     if params:
         p.update(params)
-    r = requests.get(
-        f"{TDX_BASE}/{path}",
-        headers={"Authorization": "Bearer " + token},
-        params=p, timeout=10
-    )
+    url = f"{TDX_BASE}/{path}"
+    headers = {"Authorization": "Bearer " + token}
+    r = requests.get(url, headers=headers, params=p, timeout=10)
+    if r.status_code == 429:
+        try:
+            retry_after = min(5.0, max(1.0, float(r.headers.get("Retry-After", "2"))))
+        except ValueError:
+            retry_after = 2.0
+        time.sleep(retry_after)
+        r = requests.get(url, headers=headers, params=p, timeout=10)
     r.raise_for_status()
     return r.json()
 
@@ -83,17 +88,16 @@ def get_metro_next(system, station_id, headsign_kw, cfg, line_id=None):
     if line_id:
         f += f" and LineID eq '{line_id}'"
     data = tdx(f"v2/Rail/Metro/LiveBoard/{system}", cfg, {"$filter": f})
-    # 篩選正確方向
-    trains = [t for t in data if headsign_kw in t.get("TripHeadSign", "")]
-    if not trains:  # fallback：destination name
-        trains = [t for t in data
-                  if headsign_kw in (t.get("DestinationStationName") or {}).get("Zh_tw", "")]
-    if not trains and data:
-        trains = data  # 完全 fallback
+    # 僅接受指定方向；查不到時不可退回任意方向，否則會自動上錯車。
+    trains = [
+        train for train in data
+        if headsign_kw in train.get("TripHeadSign", "")
+        or headsign_kw in (train.get("DestinationStationName") or {}).get("Zh_tw", "")
+    ]
+    trains = [train for train in trains if isinstance(train.get("EstimateTime"), int)]
     if not trains:
         return None
-    trains.sort(key=lambda x: x.get("EstimateTime", 999))
-    return trains[0].get("EstimateTime")  # 整數分鐘
+    return min(train["EstimateTime"] for train in trains)
 
 
 def get_bus_eta(city, route, stop_name, direction, cfg):
@@ -106,9 +110,11 @@ def get_bus_eta(city, route, stop_name, direction, cfg):
             "$orderby": "EstimateTime asc"
         }
     )
-    if data:
-        est = data[0].get("EstimateTime")
-        plate = data[0].get("PlateNumb", "?")
+    estimates = [item for item in data if isinstance(item.get("EstimateTime"), int)]
+    if estimates:
+        next_bus = min(estimates, key=lambda item: item["EstimateTime"])
+        est = next_bus["EstimateTime"]
+        plate = next_bus.get("PlateNumb") or "?"
         return est, plate
     return None, None
 
@@ -342,29 +348,35 @@ def update_metro_waiting(leg):
 
 def update_metro_on_board(leg):
     """
-    在車上：以上車時刻起算倒數。
-    同時查目的站 LiveBoard 作為輔助確認。
-    無法用 TrainNo 追蹤特定列車，以計時器為主。
+    在車上：持續查目的站 LiveBoard。
+    TDX 捷運 LiveBoard 沒有 TrainNo，因此用「方向 + 上車時間 +
+    目的站到站事件」配對，並設最短行駛時間避免誤認前一班列車。
     """
     elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
     remain  = max(0, leg["est_min"] - elapsed)
+    min_arrival_minutes = max(0.5, leg["est_min"] * 0.35)
 
-    # 查目的站確認
+    # 查目的站；EstimateTime == 0 代表相同方向列車已抵達目的站。
     try:
         est_dest = get_metro_next(
             leg["system"], leg["to_id"],
             leg.get("headsign", ""), CFG,
             line_id=leg.get("line_id")
         )
+        if est_dest == 0 and elapsed >= min_arrival_minutes:
+            leg["info"] = f"已抵達 {leg['to_name']}，自動下車"
+            advance_to_next_leg()
+            return
         if est_dest is not None:
-            leg["info"] = f"行駛中　{leg['to_name']} 還有 {est_dest} 分"
+            leg["info"] = f"行駛中　目的站 {leg['to_name']}：{est_dest} 分後有車抵達"
         else:
             leg["info"] = f"行駛中　約 {remain:.0f} 分鐘到 {leg['to_name']}"
     except Exception:
         leg["info"] = f"行駛中　約 {remain:.0f} 分鐘到 {leg['to_name']}"
 
-    # 超時自動推進（寬限 2 分鐘）
-    if elapsed >= leg["est_min"] + 2:
+    # TDX 若漏掉到站事件，以預估時間 + 1 分鐘作為安全備援。
+    if elapsed >= leg["est_min"] + 1:
+        leg["info"] = f"已到達 {leg['to_name']}（預估時間備援）"
         advance_to_next_leg()
 
 
@@ -390,7 +402,7 @@ def update_bus_waiting(leg):
         arrivals = [
             bus for bus in near
             if bus.get("StopName", {}).get("Zh_tw", "") == leg["from_stop"]
-            and bus.get("A2EventType") == 0
+            and bus.get("A2EventType") in (0, 1)
             and bus.get("PlateNumb", "")
         ]
         if arrivals:
@@ -430,9 +442,10 @@ def update_bus_on_board(leg):
         # 判斷是否到達下車站
         at_dest = [b for b in near
                    if b.get("StopName", {}).get("Zh_tw", "") == leg["to_stop"]
-                   and b.get("A2EventType") == 0
+                   and b.get("A2EventType") in (0, 1)
                    and b.get("PlateNumb", "") == plate]
         if at_dest:
+            leg["info"] = f"已抵達 {leg['to_stop']}，自動下車"
             advance_to_next_leg()
             return
 
@@ -441,12 +454,12 @@ def update_bus_on_board(leg):
         cur_stop = leg.get("current_stop", "")
         leg["info"] = f"{'📍 ' + cur_stop if cur_stop else '行駛中'}　剩約 {remain:.0f} 分"
 
-        # fallback 計時
-        if elapsed >= leg["est_min"] + 3:
+        # TDX 若漏掉目的站事件，以預估時間 + 2 分鐘作為安全備援。
+        if elapsed >= leg["est_min"] + 2:
             advance_to_next_leg()
     except Exception as e:
         elapsed = (ts() - datetime.datetime.fromisoformat(leg["started_at"])).total_seconds() / 60
-        if elapsed >= leg["est_min"] + 3:
+        if elapsed >= leg["est_min"] + 2:
             advance_to_next_leg()
         else:
             leg["info"] = f"行駛中… 約 {max(0, leg['est_min'] - elapsed):.0f} 分"
@@ -466,7 +479,7 @@ def poll_loop():
                     leg = STATUS["legs"][cur_idx]
                     ltype  = leg["type"]
                     lstatus = leg["status"]
-                if lstatus == "waiting":
+                if lstatus in ("waiting", "on_board"):
                     sleep_seconds = 15
 
                 if ltype == "walk" and lstatus == "walking":
